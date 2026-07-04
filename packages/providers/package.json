@@ -1,0 +1,19 @@
+{
+  "name": "@signhify/providers",
+  "version": "0.1.0",
+  "description": "Model provider adapters for Signhify CLI",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@signhify/core": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vitest": "^2.0.0"
+  }
+}

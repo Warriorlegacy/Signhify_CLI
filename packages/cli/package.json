@@ -1,0 +1,32 @@
+{
+  "name": "@signhify/cli",
+  "version": "0.1.0",
+  "description": "Terminal frontend for the Signhify AI coding agent",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "signhify": "./dist/index.js"
+  },
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc -b",
+    "test": "node ../../node_modules/vitest/vitest.mjs run"
+  },
+  "dependencies": {
+    "@signhify/core": "*",
+    "@signhify/providers": "*",
+    "@signhify/tools": "*",
+    "@signhify/memory": "*",
+    "ink": "^5",
+    "ink-text-input": "^6",
+    "ink-spinner": "^5",
+    "react": "^18",
+    "yargs": "^17"
+  },
+  "devDependencies": {
+    "@types/react": "^18",
+    "@types/yargs": "^17",
+    "typescript": "^5.4",
+    "vitest": "^2.0.0"
+  }
+}

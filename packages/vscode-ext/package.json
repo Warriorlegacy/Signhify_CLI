@@ -1,0 +1,105 @@
+{
+  "name": "@signhify/vscode-ext",
+  "displayName": "Signhify — AI Engineering Agent",
+  "description": "Your AI engineering partner — in the terminal and in the IDE",
+  "version": "0.1.0",
+  "publisher": "signhify",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "signhify.newTask",
+        "title": "Signhify: New Task"
+      },
+      {
+        "command": "signhify.switchMode",
+        "title": "Signhify: Switch Mode"
+      },
+      {
+        "command": "signhify.openMemory",
+        "title": "Signhify: Open Memory"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "signhify",
+          "title": "Signhify",
+          "icon": "resources/signhify-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "signhify": [
+        {
+          "type": "webview",
+          "id": "signhify.chat",
+          "name": "Signhify Chat"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Signhify",
+      "properties": {
+        "signhify.provider.vendor": {
+          "type": "string",
+          "enum": [
+            "anthropic",
+            "google",
+            "openai",
+            "openai-compatible"
+          ],
+          "default": "openai",
+          "description": "Model provider"
+        },
+        "signhify.provider.model": {
+          "type": "string",
+          "default": "gpt-4",
+          "description": "Model name"
+        },
+        "signhify.provider.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for the selected provider"
+        },
+        "signhify.provider.baseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Base URL for OpenAI-compatible providers"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --external:playwright --external:playwright-core --format=cjs --platform=node",
+    "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --external:playwright --external:playwright-core --format=cjs --platform=node --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@signhify/core": "*",
+    "@signhify/providers": "*",
+    "@signhify/tools": "*",
+    "@signhify/memory": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

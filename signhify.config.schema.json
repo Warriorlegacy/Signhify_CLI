@@ -1,0 +1,142 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://signhify.dev/schema/signhify.config.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/providerConfig"
+        },
+        "autocomplete": {
+          "$ref": "#/$defs/providerConfig"
+        }
+      }
+    },
+    "modes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "custom": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/customMode"
+          }
+        }
+      }
+    },
+    "memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tokenBudget": {
+          "type": "integer",
+          "default": 4000,
+          "description": "Max tokens of memory injected per turn."
+        },
+        "checkpointThresholdPct": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 80,
+          "description": "Context-window usage % that triggers a checkpoint."
+        }
+      }
+    },
+    "automation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "shellAllowlist": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Shell commands allowed in --auto mode. Empty = all allowed."
+        },
+        "shellDenylist": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Shell commands always denied, even in --auto mode."
+        }
+      }
+    },
+    "mcpServers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/mcpServer"
+      },
+      "description": "MCP servers to connect to."
+    }
+  },
+  "$defs": {
+    "providerConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "vendor": {
+          "type": "string",
+          "enum": ["anthropic", "google", "openai", "openai-compatible"],
+          "description": "Model vendor identifier."
+        },
+        "model": {
+          "type": "string",
+          "description": "Model identifier (e.g. gpt-4o-mini, claude-3-5-sonnet)."
+        },
+        "apiKeyRef": {
+          "type": "string",
+          "description": "API key reference. Format: 'env:VAR_NAME' or literal key."
+        },
+        "baseUrl": {
+          "type": "string",
+          "description": "Base URL for openai-compatible providers."
+        }
+      },
+      "required": ["vendor", "model"]
+    },
+    "customMode": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Mode identifier used to switch into this mode."
+        },
+        "prompt": {
+          "type": "string",
+          "description": "System prompt for this mode."
+        },
+        "allowedTools": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Tools this mode is allowed to use."
+        }
+      },
+      "required": ["name", "prompt", "allowedTools"]
+    },
+    "mcpServer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Server display name."
+        },
+        "command": {
+          "type": "string",
+          "description": "Command to spawn the server process."
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Arguments passed to the command."
+        }
+      },
+      "required": ["name", "command"]
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "jsx": "react-jsx",
+    "esModuleInterop": true,
+    "composite": true
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../core" },
+    { "path": "../providers" },
+    { "path": "../tools" },
+    { "path": "../memory" }
+  ]
+}
