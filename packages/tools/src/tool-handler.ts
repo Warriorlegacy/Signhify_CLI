@@ -2,5 +2,6 @@ export interface ToolHandler {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
-  execute(args: Record<string, unknown>, context: { workingDirectory: string }): Promise<string>;
+  requiresConsent?: boolean;
+  execute(args: Record<string, unknown>, context: { workingDirectory: string; projectDir?: string; autoMode?: boolean }): Promise<string>;
 }

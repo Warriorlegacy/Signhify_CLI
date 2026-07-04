@@ -14,7 +14,8 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onCommand:signhify.newTask"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -30,6 +31,10 @@
       {
         "command": "signhify.openMemory",
         "title": "Signhify: Open Memory"
+      },
+      {
+        "command": "signhify.triggerInlineCompletion",
+        "title": "Signhify: Trigger Inline Completion"
       }
     ],
     "viewsContainers": {
@@ -78,6 +83,32 @@
           "type": "string",
           "default": "",
           "description": "Base URL for OpenAI-compatible providers"
+        },
+        "signhify.provider.autocomplete.vendor": {
+          "type": "string",
+          "enum": [
+            "anthropic",
+            "google",
+            "openai",
+            "openai-compatible"
+          ],
+          "default": "openai-compatible",
+          "description": "Model provider for inline autocomplete"
+        },
+        "signhify.provider.autocomplete.model": {
+          "type": "string",
+          "default": "gpt-4",
+          "description": "Model name for inline autocomplete"
+        },
+        "signhify.provider.autocomplete.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for inline autocomplete provider"
+        },
+        "signhify.provider.autocomplete.baseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Base URL for inline autocomplete provider"
         }
       }
     }

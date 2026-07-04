@@ -1,8 +1,9 @@
 import { Message, StreamChunk, ToolCall, Goal, GoalVerdict, SignhifyConfig, ToolDefinition } from './types.js';
 import { ModeManager } from './modes.js';
-import { PermissionEngine } from './permission-engine.js';
+import { PermissionEngine, PermissionCheck } from './permission-engine.js';
 import { ContextManager, ContextAssemblyResult } from './context-manager.js';
 import { TaskManager } from './task-manager.js';
+import * as readline from 'node:readline';
 
 export interface ModelProviderAdapter {
   readonly id: string;
@@ -59,7 +60,8 @@ export interface ToolHandler {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
-  execute(args: Record<string, unknown>, context: { workingDirectory: string }): Promise<string>;
+  requiresConsent?: boolean;
+  execute(args: Record<string, unknown>, context: { workingDirectory: string; projectDir?: string; autoMode?: boolean }): Promise<string>;
 }
 
 export interface AgentLoopOptions {
@@ -68,6 +70,9 @@ export interface AgentLoopOptions {
   provider?: ModelProviderAdapter;
   goal?: Goal;
   autoMode?: boolean;
+  memoryContent?: string;
+  checkpointContent?: string;
+  taskProgress?: string;
   onStream?: (chunk: StreamChunk) => void;
   onToolCall?: (call: ToolCall) => void;
   onToolResult?: (toolCallId: string, result: string, isError?: boolean) => void;
@@ -99,6 +104,9 @@ export class AgentLoop {
   private autoMode: boolean;
   private maxIterations = 20;
   private selfVerifyCommand?: string;
+  private memoryContent?: string;
+  private checkpointContent?: string;
+  private taskProgress?: string;
   private onStream?: (chunk: StreamChunk) => void;
   private onToolCall?: (call: ToolCall) => void;
   private onToolResult?: (toolCallId: string, result: string, isError?: boolean) => void;
@@ -114,6 +122,9 @@ export class AgentLoop {
     this.goal = options.goal;
     this.autoMode = options.autoMode ?? false;
     this.selfVerifyCommand = options.selfVerifyCommand;
+    this.memoryContent = options.memoryContent;
+    this.checkpointContent = options.checkpointContent;
+    this.taskProgress = options.taskProgress;
     this.onStream = options.onStream;
     this.onToolCall = options.onToolCall;
     this.onToolResult = options.onToolResult;
@@ -167,6 +178,9 @@ export class AgentLoop {
 
       const context = this.contextManager.assembleContext({
         systemPrompt: this.modeManager.getCurrentMode().prompt,
+        memoryContent: this.memoryContent,
+        checkpointContent: this.checkpointContent,
+        taskProgress: this.taskProgress,
         recentMessages: this.messages,
       });
 
@@ -346,6 +360,12 @@ export class AgentLoop {
       if (!shellPerm.allowed) {
         return { content: `Permission denied: ${shellPerm.reason}`, isError: true };
       }
+      if (shellPerm.requiresConfirmation && !this.autoMode) {
+        const confirmed = await this.promptConfirmation(`Execute shell command: ${cmd}`);
+        if (!confirmed) {
+          return { content: 'Shell command denied by user', isError: true };
+        }
+      }
     }
 
     if (call.name === 'file-write') {
@@ -362,7 +382,11 @@ export class AgentLoop {
     }
 
     try {
-      const result = await handler.execute(call.arguments, { workingDirectory: this.workingDirectory });
+      const result = await handler.execute(call.arguments, {
+        workingDirectory: this.workingDirectory,
+        projectDir: this.workingDirectory,
+        autoMode: this.autoMode,
+      });
       return { content: result };
     } catch (error) {
       return { content: `Tool error: ${error instanceof Error ? error.message : String(error)}`, isError: true };
@@ -376,7 +400,7 @@ export class AgentLoop {
     try {
       const result = await tool.execute(
         { command: this.selfVerifyCommand!, timeoutMs: 120000 },
-        { workingDirectory: this.workingDirectory }
+        { workingDirectory: this.workingDirectory, projectDir: this.workingDirectory, autoMode: this.autoMode }
       );
       return { content: result };
     } catch (error) {
@@ -434,5 +458,17 @@ export class AgentLoop {
 
   setGoal(goal: Goal): void {
     this.goal = goal;
+  }
+
+  private async promptConfirmation(message: string): Promise<boolean> {
+    if (this.autoMode) return true;
+
+    const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+    return new Promise((resolve) => {
+      rl.question(`\n${message}\nAllow? (y/N) `, (answer) => {
+        rl.close();
+        resolve(answer.trim().toLowerCase() === 'y');
+      });
+    });
   }
 }

@@ -79,10 +79,15 @@ export class SignhifyInlineCompletionProvider
     if (!this.currentRequest) return [];
 
     const config = vscode.workspace.getConfiguration('signhify');
-    const vendor = config.get<string>('provider.vendor', 'openai-compatible');
-    const model = config.get<string>('provider.model', 'gpt-4');
-    const apiKey = config.get<string>('provider.apiKey', '');
-    const baseUrl = config.get<string>('provider.baseUrl', '');
+
+    const vendor = config.get<string>('provider.autocomplete.vendor')
+      ?? config.get<string>('provider.agent.vendor', 'openai-compatible');
+    const model = config.get<string>('provider.autocomplete.model')
+      ?? config.get<string>('provider.agent.model', 'gpt-4');
+    const apiKey = config.get<string>('provider.autocomplete.apiKey')
+      ?? config.get<string>('provider.agent.apiKey', '');
+    const baseUrl = config.get<string>('provider.autocomplete.baseUrl')
+      ?? config.get<string>('provider.agent.baseUrl', '');
 
     if (!apiKey && !baseUrl) {
       return [];

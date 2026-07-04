@@ -4,6 +4,7 @@ import { AutomationConfig } from './types.js';
 export interface PermissionCheck {
   allowed: boolean;
   reason?: string;
+  requiresConfirmation?: boolean;
 }
 
 export class PermissionEngine {
@@ -26,7 +27,7 @@ export class PermissionEngine {
   }
 
   canExecuteShell(command: string): PermissionCheck {
-    if (this.isAutoMode && this.automation) {
+    if (this.automation) {
       if (this.automation.shellDenylist) {
         for (const pattern of this.automation.shellDenylist) {
           if (this.matchesPattern(command, pattern)) {
@@ -40,8 +41,14 @@ export class PermissionEngine {
             return { allowed: true };
           }
         }
-        return { allowed: false, reason: `Command not in shell allowlist` };
+        if (this.isAutoMode) {
+          return { allowed: false, reason: `Command not in shell allowlist` };
+        }
+        return { allowed: true, requiresConfirmation: true, reason: `Command not in shell allowlist — confirmation required` };
       }
+    }
+    if (!this.isAutoMode) {
+      return { allowed: true, requiresConfirmation: true };
     }
     return { allowed: true };
   }

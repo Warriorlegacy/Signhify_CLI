@@ -23,6 +23,9 @@
     "react": "^18",
     "yargs": "^17"
   },
+  "optionalDependencies": {
+    "keytar": "^7.9.0"
+  },
   "devDependencies": {
     "@types/react": "^18",
     "@types/yargs": "^17",

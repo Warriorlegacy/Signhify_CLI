@@ -7,6 +7,14 @@ interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: number;
+  fileEdits?: FileEdit[];
+}
+
+interface FileEdit {
+  id: string;
+  filePath: string;
+  content: string;
+  accepted?: boolean;
 }
 
 export class SignhifyChatProvider implements vscode.WebviewViewProvider {
@@ -36,6 +44,19 @@ export class SignhifyChatProvider implements vscode.WebviewViewProvider {
       if (message.type === 'setMode') {
         this.currentMode = message.mode;
       }
+      if (message.type === 'acceptEdit' || message.type === 'rejectEdit') {
+        const editId = message.editId as string;
+        for (const msg of this.messages) {
+          if (msg.fileEdits) {
+            const edit = msg.fileEdits.find((e) => e.id === editId);
+            if (edit) {
+              edit.accepted = message.type === 'acceptEdit';
+              break;
+            }
+          }
+        }
+        this.postMessages();
+      }
     });
   }
 
@@ -43,6 +64,7 @@ export class SignhifyChatProvider implements vscode.WebviewViewProvider {
     this.messages.push({ role: 'user', content: text, timestamp: Date.now() });
     this.postMessages();
 
+    let taskSummary: string | undefined;
     try {
       const config = this.getConfig();
       const workspaceFolder =
@@ -67,11 +89,16 @@ export class SignhifyChatProvider implements vscode.WebviewViewProvider {
         .filter((m) => m.role === 'assistant')
         .pop();
 
+      const fileEdits = this.extractFileEdits(result.toolCalls);
+
       this.messages.push({
         role: 'assistant',
         content: lastAssistant?.content ?? 'No response generated.',
         timestamp: Date.now(),
+        fileEdits: fileEdits.length > 0 ? fileEdits : undefined,
       });
+
+      taskSummary = lastAssistant?.content?.slice(0, 80) ?? 'No response generated.';
     } catch (error) {
       this.messages.push({
         role: 'assistant',
@@ -81,11 +108,35 @@ export class SignhifyChatProvider implements vscode.WebviewViewProvider {
     }
 
     this.postMessages();
+
+    if (taskSummary) {
+      vscode.window.showInformationMessage(`Task complete: ${taskSummary}`);
+    }
   }
 
   newTask(): void {
     this.messages = [];
     this.postMessages();
+  }
+
+  private extractFileEdits(
+    toolCalls: Array<{ call: { name: string; arguments: Record<string, unknown> }; result: string }>
+  ): FileEdit[] {
+    const edits: FileEdit[] = [];
+    for (const tc of toolCalls) {
+      if (tc.call.name === 'file-io' && tc.call.arguments.action === 'write') {
+        const filePath = tc.call.arguments.path as string;
+        const content = tc.call.arguments.content as string;
+        if (filePath && content) {
+          edits.push({
+            id: `edit_${Date.now()}_${edits.length}`,
+            filePath,
+            content,
+          });
+        }
+      }
+    }
+    return edits;
   }
 
   setMode(mode: string): void {
@@ -230,6 +281,89 @@ export class SignhifyChatProvider implements vscode.WebviewViewProvider {
       font-style: italic;
       padding: 8px;
     }
+    .diff-container {
+      margin-top: 8px;
+      border: 1px solid var(--vscode-input-border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .diff-header {
+      background: var(--vscode-editorGroupHeader-tabsBackground);
+      padding: 6px 10px;
+      font-size: 0.85em;
+      font-family: var(--vscode-editor-font-family, monospace);
+      color: var(--vscode-foreground);
+      border-bottom: 1px solid var(--vscode-input-border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .diff-header .file-path {
+      flex: 1;
+      font-weight: bold;
+    }
+    .diff-header .badge {
+      font-size: 0.75em;
+      padding: 1px 6px;
+      border-radius: 3px;
+      background: var(--vscode-badge-background);
+      color: var(--vscode-badge-foreground);
+    }
+    .diff-body {
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .diff-body pre {
+      margin: 0;
+      padding: 8px 10px;
+      font-family: var(--vscode-editor-font-family, monospace);
+      font-size: var(--vscode-editor-font-size);
+      line-height: 1.5;
+      white-space: pre;
+      color: var(--vscode-foreground);
+    }
+    .diff-actions {
+      display: flex;
+      gap: 6px;
+      padding: 6px 10px;
+      border-top: 1px solid var(--vscode-input-border);
+      background: var(--vscode-editorGroupHeader-tabsBackground);
+    }
+    .diff-actions button {
+      padding: 3px 12px;
+      border-radius: 4px;
+      border: 1px solid var(--vscode-input-border);
+      cursor: pointer;
+      font-family: var(--vscode-font-family);
+      font-size: 0.85em;
+    }
+    .accept-btn {
+      background: var(--vscode-testing-iconPassed);
+      color: #fff;
+      border-color: var(--vscode-testing-iconPassed) !important;
+    }
+    .reject-btn {
+      background: var(--vscode-testing-iconFailed);
+      color: #fff;
+      border-color: var(--vscode-testing-iconFailed) !important;
+    }
+    .diff-actions button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .edit-status {
+      font-size: 0.8em;
+      padding: 2px 8px;
+      border-radius: 3px;
+    }
+    .edit-accepted {
+      background: var(--vscode-testing-iconPassed);
+      color: #fff;
+    }
+    .edit-rejected {
+      background: var(--vscode-testing-iconFailed);
+      color: #fff;
+    }
   </style>
 </head>
 <body>
@@ -275,9 +409,41 @@ export class SignhifyChatProvider implements vscode.WebviewViewProvider {
           messagesEl.innerHTML = msg.messages.map(function(m) {
             var label = m.role === 'user' ? 'You' : m.role === 'system' ? 'System' : 'Signhify';
             var escaped = escapeHtml(m.content);
+            var diffHtml = '';
+            if (m.fileEdits && m.fileEdits.length > 0) {
+              diffHtml = m.fileEdits.map(function(edit) {
+                var statusBadge = '';
+                var btnDisabled = '';
+                if (edit.accepted === true) {
+                  statusBadge = '<span class="edit-status edit-accepted">Applied</span>';
+                  btnDisabled = ' disabled';
+                } else if (edit.accepted === false) {
+                  statusBadge = '<span class="edit-status edit-rejected">Rejected</span>';
+                  btnDisabled = ' disabled';
+                }
+                var contentLines = edit.content.split('\\n');
+                var numberedLines = contentLines.map(function(line, i) {
+                  return '<span style="color:var(--vscode-editorLineNumberForeground);user-select:none;display:inline-block;width:3ch;text-align:right;margin-right:1ch">' + (i + 1) + '</span>' +
+                    '<span style="color:#4ec9b0">' + escapeHtml(line) + '</span>';
+                }).join('\\n');
+                return '<div class="diff-container">' +
+                  '<div class="diff-header">' +
+                    '<span class="file-path">' + escapeHtml(edit.filePath) + '</span>' +
+                    '<span class="badge">NEW</span>' +
+                    statusBadge +
+                  '</div>' +
+                  '<div class="diff-body"><pre>' + numberedLines + '</pre></div>' +
+                  '<div class="diff-actions">' +
+                    '<button class="accept-btn" data-edit-id="' + edit.id + '"' + btnDisabled + '>Accept</button>' +
+                    '<button class="reject-btn" data-edit-id="' + edit.id + '"' + btnDisabled + '>Reject</button>' +
+                  '</div>' +
+                '</div>';
+              }).join('');
+            }
             return '<div class="message ' + m.role + '">' +
               '<div class="role">' + label + '</div>' +
               '<div class="content">' + escaped + '</div>' +
+              diffHtml +
             '</div>';
           }).join('');
         }
@@ -298,6 +464,14 @@ export class SignhifyChatProvider implements vscode.WebviewViewProvider {
       div.appendChild(document.createTextNode(text));
       return div.innerHTML;
     }
+
+    messagesEl.addEventListener('click', function(e) {
+      var target = e.target;
+      if (!target.dataset || !target.dataset.editId) return;
+      var editId = target.dataset.editId;
+      var type = target.classList.contains('accept-btn') ? 'acceptEdit' : 'rejectEdit';
+      vscode.postMessage({ type: type, editId: editId });
+    });
   </script>
 </body>
 </html>`;

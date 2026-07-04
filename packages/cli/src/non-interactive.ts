@@ -1,7 +1,7 @@
 import { SignhifyConfig, AgentLoop, Goal } from '@signhify/core';
 import { createAdapter } from '@signhify/providers';
-import { fileIoTool, shellExecTool, gitTool, searchTool } from '@signhify/tools';
-import { MemoryStore } from '@signhify/memory';
+import { fileIoTool, shellExecTool, gitTool, searchTool, browserTool, mcpClientTool } from '@signhify/tools';
+import { MemoryStore, CheckpointWriter, MemoryMdManager } from '@signhify/memory';
 import * as path from 'node:path';
 
 interface RunOptions {
@@ -29,14 +29,38 @@ export async function runNonInteractive(
   options: RunOptions
 ): Promise<void> {
   const startTime = Date.now();
+  const cwd = process.cwd();
 
   try {
+    const memoryMd = new MemoryMdManager(cwd);
+    const memoryStore = new MemoryStore(path.join(cwd, '.signhify', 'memory.db'));
+    const checkpointWriter = new CheckpointWriter(memoryStore, cwd);
+
+    const [memContent, checkpoint] = await Promise.all([
+      memoryMd.readMemoryMd(),
+      checkpointWriter.readLatestCheckpoint(),
+    ]);
+
+    let checkpointContent = '';
+    let taskProgress = '';
+    if (checkpoint) {
+      const parts: string[] = [];
+      if (checkpoint.summary) parts.push(`## Previous Session Summary\n${checkpoint.summary}`);
+      if (checkpoint.sections.decisions.length) parts.push(`## Decisions\n${checkpoint.sections.decisions.map(d => `- ${d}`).join('\n')}`);
+      if (checkpoint.sections.openIssues.length) parts.push(`## Open Issues\n${checkpoint.sections.openIssues.map(i => `- ${i}`).join('\n')}`);
+      checkpointContent = parts.join('\n\n');
+      taskProgress = checkpoint.sections.taskProgress;
+    }
+
     const adapter = createAdapter(config.provider.agent);
     const loop = new AgentLoop({
       config,
-      workingDirectory: process.cwd(),
+      workingDirectory: cwd,
       provider: adapter,
       autoMode: options.auto,
+      memoryContent: memContent || undefined,
+      checkpointContent: checkpointContent || undefined,
+      taskProgress: taskProgress || undefined,
       onCheckpoint: (sessionId, usage) => {
         if (options.output === 'json') {
           console.log(JSON.stringify({ event: 'checkpoint', sessionId, tokenUsage: usage }), null, 2);
@@ -49,6 +73,8 @@ export async function runNonInteractive(
     loop.registerTool(shellExecTool);
     loop.registerTool(gitTool);
     loop.registerTool(searchTool);
+    loop.registerTool(browserTool);
+    loop.registerTool(mcpClientTool);
 
     // Set mode
     loop.getModeManager().setMode(options.mode as 'build' | 'plan' | 'debug' | 'compose');
@@ -56,6 +82,7 @@ export async function runNonInteractive(
     const result = await loop.run(task);
     const elapsed = Date.now() - startTime;
 
+    const goalNotMet = result.goalMet === false && result.error?.includes('Max iterations');
     const runResult: RunResult = {
       success: result.success,
       task,
@@ -66,7 +93,7 @@ export async function runNonInteractive(
       goalMet: result.goalMet,
       goalVerdict: result.goalVerdict,
       error: result.error,
-      exitCode: result.success ? 0 : 1,
+      exitCode: goalNotMet ? 2 : result.success ? 0 : 1,
     };
 
     if (options.output === 'json') {

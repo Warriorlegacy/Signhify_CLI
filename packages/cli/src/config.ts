@@ -1,7 +1,23 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+import { createRequire } from "node:module";
 import type { SignhifyConfig } from "@signhify/core";
+
+interface KeytarModule {
+  setPassword(service: string, account: string, password: string): Promise<void>;
+  getPassword(service: string, account: string): Promise<string | null>;
+}
+
+let keytar: KeytarModule | null = null;
+try {
+  const require = createRequire(import.meta.url);
+  keytar = require("keytar") as KeytarModule;
+} catch {
+  // keytar not installed — keychain integration disabled
+}
+
+const KEYTAR_SERVICE = "signhify";
 
 const DEFAULT_CONFIG: SignhifyConfig = {
   provider: {
@@ -25,6 +41,16 @@ export async function signhifyConfigSchema(config: SignhifyConfig): Promise<Sign
     }
     if (agent?.vendor === 'openai-compatible' && !agent?.baseUrl) {
       errors.push('openai-compatible provider requires baseUrl');
+    }
+
+    const ac = config.provider.autocomplete;
+    if (ac) {
+      if (ac.vendor && !validVendors.includes(ac.vendor)) {
+        errors.push(`Invalid autocomplete vendor "${ac.vendor}". Must be one of: ${validVendors.join(', ')}`);
+      }
+      if (ac.vendor === 'openai-compatible' && !ac.baseUrl) {
+        errors.push('openai-compatible autocomplete provider requires baseUrl');
+      }
     }
   }
 
@@ -62,7 +88,7 @@ export async function loadConfig(projectDir?: string): Promise<SignhifyConfig> {
     const content = await fs.readFile(projectConfigPath, "utf-8");
     const parsed = JSON.parse(content) as Partial<SignhifyConfig>;
     await signhifyConfigSchema(parsed as SignhifyConfig);
-    return { ...DEFAULT_CONFIG, ...parsed } as SignhifyConfig;
+    return { ...DEFAULT_CONFIG, ...(await resolveKeytarRefs(parsed as SignhifyConfig)) } as SignhifyConfig;
   } catch {
     // no project config or validation failed
   }
@@ -72,7 +98,7 @@ export async function loadConfig(projectDir?: string): Promise<SignhifyConfig> {
     const content = await fs.readFile(globalConfigPath, "utf-8");
     const parsed = JSON.parse(content) as Partial<SignhifyConfig>;
     await signhifyConfigSchema(parsed as SignhifyConfig);
-    return { ...DEFAULT_CONFIG, ...parsed } as SignhifyConfig;
+    return { ...DEFAULT_CONFIG, ...(await resolveKeytarRefs(parsed as SignhifyConfig)) } as SignhifyConfig;
   } catch {
     // no global config or validation failed
   }
@@ -82,8 +108,53 @@ export async function loadConfig(projectDir?: string): Promise<SignhifyConfig> {
 
 export async function saveConfig(config: SignhifyConfig, projectDir?: string): Promise<void> {
   const validated = await signhifyConfigSchema(config);
+  const toSave = await storeKeytarRefs(validated);
   const dir = projectDir ?? process.cwd();
   const configDir = path.join(dir, ".signhify");
   await fs.mkdir(configDir, { recursive: true });
-  await fs.writeFile(path.join(configDir, "config.json"), JSON.stringify(validated, null, 2), "utf-8");
+  await fs.writeFile(path.join(configDir, "config.json"), JSON.stringify(toSave, null, 2), "utf-8");
+}
+
+async function storeKeytarRefs(config: SignhifyConfig): Promise<SignhifyConfig> {
+  if (!keytar || !config.provider?.agent?.apiKey) return config;
+
+  const account = config.provider.agent.model;
+  const apiKey = config.provider.agent.apiKey;
+
+  try {
+    await keytar.setPassword(KEYTAR_SERVICE, account, apiKey);
+    return {
+      ...config,
+      provider: {
+        ...config.provider,
+        agent: { ...config.provider.agent, apiKey: `keytar:${KEYTAR_SERVICE}:${account}` },
+      },
+    };
+  } catch {
+    // keychain write failed — keep plaintext key in config
+    return config;
+  }
+}
+
+async function resolveKeytarRefs(config: SignhifyConfig): Promise<SignhifyConfig> {
+  const agentKey = config.provider?.agent?.apiKey;
+  if (!agentKey || !agentKey.startsWith("keytar:")) return config;
+  if (!keytar) {
+    throw new Error(`Config references keytar key "${agentKey}" but keytar is not installed. Install keytar or use a plain API key.`);
+  }
+
+  const parts = agentKey.split(":");
+  const account = parts.slice(2).join(":");
+  const password = await keytar.getPassword(KEYTAR_SERVICE, account);
+  if (!password) {
+    throw new Error(`Keychain key not found for service="${KEYTAR_SERVICE}" account="${account}". Run the setup wizard to re-enter your API key.`);
+  }
+
+  return {
+    ...config,
+    provider: {
+      ...config.provider,
+      agent: { ...config.provider.agent, apiKey: password },
+    },
+  };
 }

@@ -43,6 +43,12 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     })
   );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('signhify.triggerInlineCompletion', () => {
+      vscode.commands.executeCommand('editor.action.inlineSuggest.trigger');
+    })
+  );
 }
 
 export function deactivate(): void {

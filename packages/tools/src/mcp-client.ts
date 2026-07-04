@@ -1,9 +1,42 @@
 import { ToolHandler } from './tool-handler.js';
 import { spawn, ChildProcess } from 'node:child_process';
+import * as readline from 'node:readline';
+
+async function promptConsent(toolName: string, args: Record<string, unknown>, autoMode?: boolean): Promise<boolean> {
+  if (autoMode) return true;
+
+  const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+  const argsPreview = Object.keys(args).length > 0 ? JSON.stringify(args, null, 2) : '(no arguments)';
+
+  return new Promise((resolve) => {
+    rl.question(
+      `\nMCP tool "${toolName}" wants to run:\n${argsPreview}\n\nAllow? (y/N) `,
+      (answer) => {
+        rl.close();
+        resolve(answer.trim().toLowerCase() === 'y');
+      }
+    );
+  });
+}
+
+export interface McpResource {
+  uri: string;
+  name: string;
+  description?: string;
+  mimeType?: string;
+}
+
+export interface McpPrompt {
+  name: string;
+  description?: string;
+  arguments?: Array<{ name: string; description?: string; required?: boolean }>;
+}
 
 interface McpConnection {
   process: ChildProcess;
   tools: Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>;
+  resources: McpResource[];
+  prompts: McpPrompt[];
   nextId: number;
   pending: Map<number, { resolve: (value: unknown) => void; reject: (reason: Error) => void; timeout: ReturnType<typeof setTimeout> }>;
   reconnectAttempts: number;
@@ -86,6 +119,8 @@ async function createConnection(
       const conn: McpConnection = {
         process: child,
         tools: [],
+        resources: [],
+        prompts: [],
         nextId: 0,
         pending: new Map(),
         reconnectAttempts: attempt,
@@ -125,6 +160,34 @@ async function createConnection(
       const tools = (toolsResponse as { result?: { tools?: Array<{ name: string; description: string; inputSchema: Record<string, unknown> }> } }).result?.tools ?? [];
       conn.tools = tools;
 
+      // Fetch resources if the server supports them
+      try {
+        const resourcesResponse = await sendRequest(conn, {
+          jsonrpc: '2.0',
+          id: nextRequestId(conn),
+          method: 'resources/list',
+          params: {},
+        });
+        const resources = (resourcesResponse as { result?: { resources?: McpResource[] } }).result?.resources ?? [];
+        conn.resources = resources;
+      } catch {
+        // Server may not support resources — that's fine
+      }
+
+      // Fetch prompts if the server supports them
+      try {
+        const promptsResponse = await sendRequest(conn, {
+          jsonrpc: '2.0',
+          id: nextRequestId(conn),
+          method: 'prompts/list',
+          params: {},
+        });
+        const prompts = (promptsResponse as { result?: { prompts?: McpPrompt[] } }).result?.prompts ?? [];
+        conn.prompts = prompts;
+      } catch {
+        // Server may not support prompts — that's fine
+      }
+
       connections.set(serverName, conn);
 
       return conn;
@@ -144,10 +207,11 @@ async function createConnection(
 export const mcpClientTool: ToolHandler = {
   name: 'mcp-client',
   description: 'Connect to MCP servers and invoke their tools',
+  requiresConsent: true,
   parameters: {
     type: 'object',
     properties: {
-      action: { type: 'string', enum: ['connect', 'list-tools', 'invoke', 'disconnect'], description: 'MCP action' },
+      action: { type: 'string', enum: ['connect', 'list-tools', 'list-resources', 'list-prompts', 'invoke', 'disconnect'], description: 'MCP action' },
       serverName: { type: 'string', description: 'Name of the MCP server' },
       command: { type: 'string', description: 'Command to start the MCP server (for connect)' },
       args: { type: 'array', items: { type: 'string' }, description: 'Arguments for the command' },
@@ -157,7 +221,7 @@ export const mcpClientTool: ToolHandler = {
     required: ['action', 'serverName'],
   },
 
-  async execute(args, _context) {
+  async execute(args, context) {
     const action = args.action as string;
     const serverName = args.serverName as string;
 
@@ -187,15 +251,35 @@ export const mcpClientTool: ToolHandler = {
           return JSON.stringify({ tools: conn.tools });
         }
 
+        case 'list-resources': {
+          const conn = connections.get(serverName);
+          if (!conn) return JSON.stringify({ error: `Not connected to ${serverName}` });
+          return JSON.stringify({ resources: conn.resources });
+        }
+
+        case 'list-prompts': {
+          const conn = connections.get(serverName);
+          if (!conn) return JSON.stringify({ error: `Not connected to ${serverName}` });
+          return JSON.stringify({ prompts: conn.prompts });
+        }
+
         case 'invoke': {
           const conn = connections.get(serverName);
           if (!conn) return JSON.stringify({ error: `Not connected to ${serverName}. Use the "connect" action first.` });
+
+          const toolName = args.toolName as string;
+          const toolArgs = (args.arguments as Record<string, unknown>) ?? {};
+
+          const allowed = await promptConsent(toolName, toolArgs, context.autoMode);
+          if (!allowed) {
+            return JSON.stringify({ error: 'MCP tool invocation denied by user' });
+          }
 
           const result = await sendRequest(conn, {
             jsonrpc: '2.0',
             id: nextRequestId(conn),
             method: 'tools/call',
-            params: { name: args.toolName, arguments: args.arguments ?? {} },
+            params: { name: toolName, arguments: toolArgs },
           });
 
           return JSON.stringify(result);
@@ -239,4 +323,16 @@ async function sendRequest(
     const payload = JSON.stringify(request) + '\n';
     conn.process.stdin?.write(payload);
   });
+}
+
+export async function listMcpResources(serverName: string): Promise<McpResource[]> {
+  const conn = connections.get(serverName);
+  if (!conn) return [];
+  return conn.resources;
+}
+
+export async function listMcpPrompts(serverName: string): Promise<McpPrompt[]> {
+  const conn = connections.get(serverName);
+  if (!conn) return [];
+  return conn.prompts;
 }
