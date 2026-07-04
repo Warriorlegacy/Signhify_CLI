@@ -12,6 +12,11 @@ npm run build
 npm run test
 ```
 
+## Documentation
+
+- [npm installation guide](docs/npm-install.md) — install from source, consume packages, VS Code extension build
+- [Package INSTALL.md](packages/core/INSTALL.md) — per-package installation instructions
+
 ## Packages
 
 | Package | Description |
@@ -22,6 +27,14 @@ npm run test
 | `@signhify/memory` | SQLite FTS5 store, checkpoint writer, dream/distill engine |
 | `@signhify/cli` | Terminal TUI (Ink) + non-interactive runner |
 | `@signhify/vscode` | VS Code extension — chat panel + inline completions |
+
+## CLI
+
+```bash
+npx signhify --help
+npx signhify run "fix the failing tests" --auto --output json
+npx signhify wizard
+```
 
 ## Development
 
