@@ -1,6 +1,6 @@
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
-import { loadConfig, saveConfig, signhifyConfigSchema } from './config.js';
+import { loadConfig } from './config.js';
 import { runInteractive } from './interactive.js';
 import { runNonInteractive } from './non-interactive.js';
 import { runSetupWizard } from './wizard.js';

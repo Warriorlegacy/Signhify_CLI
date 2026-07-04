@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { AgentLoop, SignhifyConfig } from '@signhify/core';
+import type { AgentLoop, SignhifyConfig } from '@signhify/core';
 import { createAdapter } from '@signhify/providers';
 import { fileIoTool, shellExecTool, gitTool, searchTool } from '@signhify/tools';
 
@@ -157,7 +157,7 @@ export class SignhifyChatProvider implements vscode.WebviewViewProvider {
     return {
       provider: {
         agent: {
-          vendor: config.get<string>('provider.vendor', 'openai'),
+          vendor: config.get<'anthropic' | 'google' | 'openai' | 'openai-compatible'>('provider.vendor', 'openai'),
           model: config.get<string>('provider.model', 'gpt-4'),
           apiKey: config.get<string>('provider.apiKey', ''),
           baseUrl: config.get<string>('provider.baseUrl', ''),

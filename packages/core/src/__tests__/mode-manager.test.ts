@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ModeManager, BUILT_IN_MODES } from '../modes.js';
+import { ModeManager } from '../modes.js';
 
 describe('ModeManager', () => {
   it('should initialize with build mode', () => {

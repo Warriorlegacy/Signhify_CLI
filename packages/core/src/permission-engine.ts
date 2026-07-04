@@ -53,7 +53,7 @@ export class PermissionEngine {
     return { allowed: true };
   }
 
-  canWriteFile(filePath: string): PermissionCheck {
+  canWriteFile(_filePath: string): PermissionCheck {
     const mode = this.modeManager.getCurrentMode();
     if (mode.name === 'plan') {
       return { allowed: false, reason: 'File writes are not allowed in plan mode' };

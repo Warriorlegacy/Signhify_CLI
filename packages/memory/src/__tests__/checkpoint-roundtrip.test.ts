@@ -8,9 +8,8 @@ describe('Memory checkpoint round-trip', () => {
     const dbPath = ':memory:';
     const store = new MemoryStore(dbPath);
     const writer = new CheckpointWriter(store, '/tmp/test-project');
-    const memoryMd = new MemoryMdManager('/tmp/test-project');
 
-    const checkpointPath = await writer.writeCheckpoint({
+    await writer.writeCheckpoint({
       sessionId: 'sess_test_123',
       summary: 'Initial scaffold complete',
       tokenUsage: 4500,

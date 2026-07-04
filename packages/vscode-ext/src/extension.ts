@@ -1,9 +1,7 @@
 import * as vscode from "vscode";
+import * as path from 'node:path';
 import { SignhifyChatProvider } from './chat-provider.js';
 import { SignhifyInlineCompletionProvider } from './inline-completion.js';
-import { createAdapter } from '@signhify/providers';
-import { AgentLoop } from '@signhify/core';
-import { fileIoTool, shellExecTool, gitTool, searchTool } from '@signhify/tools';
 
 export function activate(context: vscode.ExtensionContext): void {
   const chatProvider = new SignhifyChatProvider(context);
@@ -11,7 +9,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerWebviewViewProvider(SignhifyChatProvider.viewType, chatProvider)
   );
 
-  const inlineProvider = new SignhifyInlineCompletionProvider(context);
+  const inlineProvider = new SignhifyInlineCompletionProvider();
   context.subscriptions.push(
     vscode.languages.registerInlineCompletionItemProvider({ pattern: '**' }, inlineProvider)
   );
@@ -34,7 +32,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('signhify.openMemory', async () => {
       const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '.';
-      const memoryPath = require('path').join(workspaceFolder, '.signhify', 'MEMORY.md');
+      const memoryPath = path.join(workspaceFolder, '.signhify', 'MEMORY.md');
       const uri = vscode.Uri.file(memoryPath);
       try {
         await vscode.commands.executeCommand('vscode.open', uri);
@@ -52,5 +50,4 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
-  // noop
 }

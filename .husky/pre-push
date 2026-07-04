@@ -1,0 +1,17 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Check Node.js version matches package.json
+NODE_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
+REQUIRED_VERSION="20"
+
+if [ "$NODE_VERSION" -lt "$REQUIRED_VERSION" ]; then
+  echo "✗ Node.js $REQUIRED_VERSION+ required (found $NODE_VERSION)"
+  exit 1
+fi
+
+echo "✓ Node.js version check passed ($NODE_VERSION.x)"
+
+# Run typecheck before push
+echo "Running typecheck..."
+npm run typecheck

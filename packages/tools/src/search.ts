@@ -2,11 +2,7 @@ import { ToolHandler } from './tool-handler.js';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
-interface MatchResult {
-  file: string;
-  line: number;
-  text: string;
-}
+
 
 function escapeRegex(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

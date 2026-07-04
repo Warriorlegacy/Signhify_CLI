@@ -1,4 +1,4 @@
-import { SignhifyConfig, AgentLoop, Goal } from '@signhify/core';
+import { SignhifyConfig, AgentLoop } from '@signhify/core';
 import { createAdapter } from '@signhify/providers';
 import { fileIoTool, shellExecTool, gitTool, searchTool, browserTool, mcpClientTool } from '@signhify/tools';
 import { MemoryStore, CheckpointWriter, MemoryMdManager } from '@signhify/memory';

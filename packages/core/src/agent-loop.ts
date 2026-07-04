@@ -1,6 +1,6 @@
 import { Message, StreamChunk, ToolCall, Goal, GoalVerdict, SignhifyConfig, ToolDefinition } from './types.js';
 import { ModeManager } from './modes.js';
-import { PermissionEngine, PermissionCheck } from './permission-engine.js';
+import { PermissionEngine } from './permission-engine.js';
 import { ContextManager, ContextAssemblyResult } from './context-manager.js';
 import { TaskManager } from './task-manager.js';
 import * as readline from 'node:readline';

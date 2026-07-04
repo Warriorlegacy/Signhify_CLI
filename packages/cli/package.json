@@ -10,7 +10,8 @@
   "license": "MIT",
   "scripts": {
     "build": "tsc -b",
-    "test": "node ../../node_modules/vitest/vitest.mjs run"
+    "test": "node ../../node_modules/vitest/vitest.mjs run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@signhify/core": "*",
@@ -31,5 +32,8 @@
     "@types/yargs": "^17",
     "typescript": "^5.4",
     "vitest": "^2.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

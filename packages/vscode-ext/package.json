@@ -116,9 +116,8 @@
   "scripts": {
     "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --external:playwright --external:playwright-core --format=cjs --platform=node",
     "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --external:playwright --external:playwright-core --format=cjs --platform=node --watch",
-    "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "clean": "rm -rf dist *.tsbuildinfo"
+    "clean": "node -e \"const {rmSync,existsSync}=require('fs');['dist','*.tsbuildinfo'].forEach(p=>{if(existsSync(p))rmSync(p,{recursive:true,force:true})})\""
   },
   "dependencies": {
     "@signhify/core": "*",

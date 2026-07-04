@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { AgentLoop, ToolHandler } from '../agent-loop.js';
 import { SignhifyConfig } from '../types.js';
 
@@ -61,14 +61,13 @@ describe('AgentLoop', () => {
     expect(permission.allowed).toBe(true);
   });
 
-  it('should track goal state', () => {
+  it('should track goal state', async () => {
     const loop = new AgentLoop({
       config: mockConfig,
       workingDirectory: '/tmp/test',
       goal: { statement: 'All tests pass', maxIterations: 5 },
     });
 
-    const verdict = loop.checkGoal();
-    expect(verdict).resolves.toBeNull();
+    await expect(loop.checkGoal()).resolves.toBeNull();
   });
 });

@@ -17,9 +17,10 @@ dist/
 .DS_Store
 Thumbs.db
 
-# IDE
-.vscode/
+# IDE (we commit .vscode/ settings for contributor DX; exclude personal files)
 .idea/
+*.swp
+*.swo
 
 # Test coverage
 coverage/
@@ -27,3 +28,21 @@ coverage/
 # Logs
 *.log
 npm-debug.log*
+
+# Turborepo cache
+.turbo/
+
+# Husky
+.husky/_
+
+# Local development
+opencode-dev/
+logs/
+.dev-home/
+
+# Reference forks — not part of the product
+/MiMo-Code-main/
+
+# Experiment artifacts
+experiments/
+scratch/

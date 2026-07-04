@@ -27,6 +27,6 @@ describe('createAdapter', () => {
   });
 
   it('should throw on unknown vendor', () => {
-    expect(() => createAdapter({ vendor: 'unknown' as any, model: 'x', apiKey: 'test' })).toThrow('Unknown vendor');
+    expect(() => createAdapter({ vendor: 'unknown' as 'openai', model: 'x', apiKey: 'test' })).toThrow('Unknown vendor');
   });
 });

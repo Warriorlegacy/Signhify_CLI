@@ -139,7 +139,7 @@ async function createConnection(
         connections.delete(serverName);
       });
 
-      const initResponse = await sendRequest(conn, {
+      await sendRequest(conn, {
         jsonrpc: '2.0',
         id: nextRequestId(conn),
         method: 'initialize',

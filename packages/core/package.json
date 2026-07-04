@@ -17,11 +17,15 @@
     "build": "tsc -b",
     "dev": "tsc -b --watch",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist *.tsbuildinfo"
+    "test": "vitest run",
+    "clean": "node -e \"const {rmSync,existsSync}=require('fs');['dist','*.tsbuildinfo'].forEach(p=>{if(existsSync(p))rmSync(p,{recursive:true,force:true})})\""
   },
   "dependencies": {},
   "devDependencies": {
     "@types/node": "^20.11.0",
     "typescript": "^5.5.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

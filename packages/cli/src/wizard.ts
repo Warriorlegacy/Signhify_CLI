@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { render, Box, Text, useApp } from 'ink';
+import { render, Box, Text } from 'ink';
 import TextInput from 'ink-text-input';
 import { signhifyConfigSchema } from './config.js';
 
@@ -9,12 +9,11 @@ const STEPS: WizardStep[] = ['choice', 'provider', 'model', 'apikey', 'done'];
 
 function WizardApp() {
   const [stepIdx, setStepIdx] = useState(0);
-  const [choice, setChoice] = useState('');
+  const setChoice = useState('')[1];
   const [provider, setProvider] = useState('');
   const [model, setModel] = useState('');
-  const [apiKey, setApiKey] = useState('');
+  const setApiKey = useState('')[1];
   const [error, setError] = useState('');
-  const { exit } = useApp();
 
   const step: WizardStep = STEPS[stepIdx];
 
