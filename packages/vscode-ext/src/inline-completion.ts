@@ -93,7 +93,7 @@ export class SignhifyInlineCompletionProvider
       return [];
     }
 
-    const adapter = createAdapter({
+    const adapter = await createAdapter({
       vendor: vendor as 'anthropic' | 'google' | 'openai' | 'openai-compatible',
       model,
       apiKey,

@@ -6,7 +6,11 @@ import { SignhifyConfig, AgentLoop, Goal, TaskNode } from '@signhify/core';
 import { createAdapter } from '@signhify/providers';
 import { MemoryMdManager, MemoryStore, DreamDistillEngine, CheckpointWriter } from '@signhify/memory';
 import { fileIoTool, shellExecTool, gitTool, searchTool, browserTool, mcpClientTool } from '@signhify/tools';
+import { createRequire } from 'node:module';
 import * as path from 'node:path';
+
+const require = createRequire(import.meta.url);
+const { version: CLI_VERSION } = require('../package.json') as { version: string };
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -49,10 +53,17 @@ function ChatApp({ config }: { config: SignhifyConfig }) {
         if (cp.sections.taskProgress) setTaskProgress(cp.sections.taskProgress);
       }
     })();
-  }, []);
 
-  const buildLoop = useCallback(() => {
-    const adapter = createAdapter(config.provider.agent);
+    if (!config.provider?.agent?.apiKey && !config.provider?.agent?.apiKeyRef) {
+      setMessages(prev => [...prev, {
+        role: 'system',
+        content: 'Welcome! No API key configured. Run `signhify wizard` to set up your provider, or set an API key in .signhify/config.json.',
+      }]);
+    }
+  }, [config]);
+
+  const buildLoop = useCallback(async () => {
+    const adapter = await createAdapter(config.provider.agent);
     const loop = new AgentLoop({
       config,
       workingDirectory: process.cwd(),
@@ -144,13 +155,20 @@ function ChatApp({ config }: { config: SignhifyConfig }) {
     setIsLoading(true);
 
     try {
-      const loop = buildLoop();
+      const loop = await buildLoop();
       const result = await loop.run(value);
-      const lastAssistant = result.messages.filter(m => m.role === 'assistant').pop();
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: lastAssistant?.content ?? 'No response generated.',
-      }]);
+      if (result.error) {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: result.error!,
+        }]);
+      } else {
+        const lastAssistant = result.messages.filter(m => m.role === 'assistant').pop();
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: lastAssistant?.content ?? 'No response generated.',
+        }]);
+      }
       setTaskTree(loop.getTaskManager().getTaskTree());
     } catch (error) {
       setMessages(prev => [...prev, {
@@ -175,7 +193,7 @@ function ChatApp({ config }: { config: SignhifyConfig }) {
   return React.createElement(Box, { flexDirection: 'row', padding: 1 },
     React.createElement(Box, { flexDirection: 'column', width: '75%' },
       React.createElement(Box, { marginBottom: 1 },
-        React.createElement(Text, { bold: true, color: 'green' }, 'Signhify v0.1.0'),
+        React.createElement(Text, { bold: true, color: 'green' }, `Signhify v${CLI_VERSION}`),
         React.createElement(Text, { color: 'cyan', bold: true }, ` [${mode}]`),
         goal ? React.createElement(Text, { color: 'yellow' }, ` Goal: "${goal.statement}"`) : null
       ),

@@ -70,7 +70,7 @@ export class SignhifyChatProvider implements vscode.WebviewViewProvider {
       const workspaceFolder =
         vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
 
-      const adapter = createAdapter(config.provider.agent);
+      const adapter = await createAdapter(config.provider.agent);
       const loop = new AgentLoop({
         config,
         workingDirectory: workspaceFolder,

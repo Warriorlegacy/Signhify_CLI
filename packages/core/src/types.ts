@@ -37,7 +37,7 @@ export interface StreamChunk {
 export interface TokenUsage {
   promptTokens: number;
   completionTokens: number;
-  totalTokens: number;
+  totalTokens?: number;
 }
 
 // Config types
@@ -55,7 +55,7 @@ export interface SignhifyConfig {
 }
 
 export interface ProviderConfig {
-  vendor: 'anthropic' | 'google' | 'openai' | 'openai-compatible';
+  vendor: string;
   model: string;
   apiKey?: string;
   apiKeyRef?: string;

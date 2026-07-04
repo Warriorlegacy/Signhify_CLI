@@ -52,7 +52,7 @@ export async function runNonInteractive(
       taskProgress = checkpoint.sections.taskProgress;
     }
 
-    const adapter = createAdapter(config.provider.agent);
+    const adapter = await createAdapter(config.provider.agent);
     const loop = new AgentLoop({
       config,
       workingDirectory: cwd,

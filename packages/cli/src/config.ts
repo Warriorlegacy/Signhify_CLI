@@ -21,7 +21,7 @@ const KEYTAR_SERVICE = "signhify";
 
 const DEFAULT_CONFIG: SignhifyConfig = {
   provider: {
-    agent: { vendor: "openai-compatible", model: "gpt-4", apiKeyRef: "env:OPENAI_API_KEY" },
+    agent: { vendor: "openai", model: "gpt-4", apiKeyRef: "env:OPENAI_API_KEY" },
   },
   memory: { tokenBudget: 4000, checkpointThresholdPct: 80 },
 };
@@ -35,22 +35,13 @@ export async function signhifyConfigSchema(config: SignhifyConfig): Promise<Sign
     const agent = config.provider.agent;
     if (!agent?.vendor) errors.push('Missing provider.agent.vendor');
     if (!agent?.model) errors.push('Missing provider.agent.model');
-    const validVendors = ['anthropic', 'google', 'openai', 'openai-compatible'];
-    if (agent?.vendor && !validVendors.includes(agent.vendor)) {
-      errors.push(`Invalid vendor "${agent.vendor}". Must be one of: ${validVendors.join(', ')}`);
-    }
     if (agent?.vendor === 'openai-compatible' && !agent?.baseUrl) {
       errors.push('openai-compatible provider requires baseUrl');
     }
 
     const ac = config.provider.autocomplete;
-    if (ac) {
-      if (ac.vendor && !validVendors.includes(ac.vendor)) {
-        errors.push(`Invalid autocomplete vendor "${ac.vendor}". Must be one of: ${validVendors.join(', ')}`);
-      }
-      if (ac.vendor === 'openai-compatible' && !ac.baseUrl) {
-        errors.push('openai-compatible autocomplete provider requires baseUrl');
-      }
+    if (ac && ac.vendor === 'openai-compatible' && !ac.baseUrl) {
+      errors.push('openai-compatible autocomplete provider requires baseUrl');
     }
   }
 

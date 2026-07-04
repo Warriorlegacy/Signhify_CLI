@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { render, Box, Text } from 'ink';
 import TextInput from 'ink-text-input';
-import { signhifyConfigSchema } from './config.js';
+import { signhifyConfigSchema, saveConfig } from './config.js';
 
 type WizardStep = 'choice' | 'provider' | 'model' | 'apikey' | 'done';
 
@@ -38,9 +38,8 @@ function WizardApp() {
 
   const handleProvider = useCallback(async (value: string) => {
     const trimmed = value.trim().toLowerCase();
-    const valid = ['anthropic', 'google', 'openai', 'openai-compatible'];
-    if (!valid.includes(trimmed)) {
-      setError('Enter: anthropic, google, openai, or openai-compatible');
+    if (!trimmed) {
+      setError('Enter a provider name');
       return;
     }
     setProvider(trimmed);
@@ -60,7 +59,7 @@ function WizardApp() {
     const cfg = {
       provider: {
         agent: {
-          vendor: provider as 'anthropic' | 'google' | 'openai' | 'openai-compatible',
+          vendor: provider,
           model: model || 'gpt-4',
           apiKey: trimmed,
           ...(provider === 'openai-compatible' && { baseUrl: 'http://localhost:11434/v1' }),
@@ -69,6 +68,7 @@ function WizardApp() {
     };
     try {
       await signhifyConfigSchema(cfg);
+      await saveConfig(cfg);
       advance('done');
       setError('');
     } catch (err) {
@@ -94,7 +94,7 @@ function WizardApp() {
     : step === 'provider'
       ? React.createElement(Box, { flexDirection: 'column' },
           React.createElement(Text, { bold: true }, 'Select provider'),
-          React.createElement(Text, {}, 'anthropic, google, openai, or openai-compatible'),
+          React.createElement(Text, {}, 'e.g. openai, anthropic, google, mistral, groq, xai, together, deepinfra, fireworks, cohere'),
           React.createElement(Box, { marginTop: 1 },
             React.createElement(TextInput, { value: '', onChange: handleProvider, placeholder: 'provider name...' })
           )

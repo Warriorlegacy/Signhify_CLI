@@ -1,7 +1,8 @@
 {
   "name": "@signhify/providers",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Model provider adapters for Signhify CLI",
+  "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "license": "MIT",
@@ -11,7 +12,26 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@signhify/core": "*"
+    "@ai-sdk/alibaba": "^2.0.7",
+    "@ai-sdk/amazon-bedrock": "^5.0.11",
+    "@ai-sdk/anthropic": "^4.0.8",
+    "@ai-sdk/azure": "^4.0.7",
+    "@ai-sdk/cerebras": "^3.0.5",
+    "@ai-sdk/cohere": "^4.0.5",
+    "@ai-sdk/deepinfra": "^3.0.5",
+    "@ai-sdk/fireworks": "^3.0.6",
+    "@ai-sdk/gateway": "^4.0.12",
+    "@ai-sdk/google": "^4.0.8",
+    "@ai-sdk/google-vertex": "^5.0.11",
+    "@ai-sdk/groq": "^4.0.5",
+    "@ai-sdk/mistral": "^4.0.5",
+    "@ai-sdk/openai": "^4.0.7",
+    "@ai-sdk/perplexity": "^4.0.6",
+    "@ai-sdk/togetherai": "^3.0.6",
+    "@ai-sdk/xai": "^4.0.6",
+    "@signhify/core": "*",
+    "ai": "^7.0.15",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "typescript": "^5.4.0",
