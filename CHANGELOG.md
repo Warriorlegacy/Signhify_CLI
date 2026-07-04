@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-04
+
+### Fixed
+
+- SQLite database crash on first run — `MemoryStore` now creates the `.signhify/` directory before opening the database
+- Installer scripts (`install.ps1`, `install.sh`) returning 404 on the website — now served from Vercel
+
+### Added
+
+- Studio brand assets (logo, banner, icon) across README, website, and VS Code extension
+- Vercel deployment config for static site publishing
+- Clean URL support and Open Graph meta tags for the website
+
+## [0.1.0] - 2026-07-04
+
 ### Added
 
 - Full OSS infrastructure: CONTRIBUTING.md, SECURITY.md, CODE_OF_CONDUCT.md, USE_RESTRICTIONS.md
