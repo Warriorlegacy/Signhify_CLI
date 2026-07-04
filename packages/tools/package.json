@@ -1,6 +1,6 @@
 {
   "name": "@signhify/tools",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Tool handlers for the Signhify agent loop",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

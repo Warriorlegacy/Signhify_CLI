@@ -1,6 +1,6 @@
 {
   "name": "@signhify/providers",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Model provider adapters for Signhify CLI",
   "type": "module",
   "main": "dist/index.js",

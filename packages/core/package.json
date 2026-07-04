@@ -1,6 +1,6 @@
 {
   "name": "@signhify/core",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Signhify agent runtime — loop, modes, permissions, context management",
   "license": "MIT",
   "type": "module",

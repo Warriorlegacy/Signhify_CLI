@@ -2,7 +2,7 @@
   "name": "@signhify/vscode-ext",
   "displayName": "Signhify — AI Engineering Agent",
   "description": "Your AI engineering partner — in the terminal and in the IDE",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "signhify",
   "license": "MIT",
   "private": true,
