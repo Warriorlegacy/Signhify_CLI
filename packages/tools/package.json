@@ -21,9 +21,10 @@
     "simple-git": "^3.27.0"
   },
   "devDependencies": {
+    "@types/node": "^20.11.0",
+    "playwright": "^1.61.1",
     "typescript": "^5.5.0",
-    "vitest": "^2.0.0",
-    "@types/node": "^20.11.0"
+    "vitest": "^2.0.0"
   },
   "publishConfig": {
     "access": "public"
