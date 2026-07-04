@@ -1,6 +1,10 @@
 <p align="center">
-  <h1 align="center">Signhify</h1>
-  <p align="center"><em>Your AI engineering partner — in the terminal and in the IDE</em></p>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/banners/signhify-banner-dark.png">
+    <img src="./assets/banners/signhify-banner.png" alt="Signhify" width="600">
+  </picture>
+  <br>
+  <em>Your AI engineering partner — in the terminal and in the IDE</em>
 </p>
 
 <p align="center">
@@ -8,7 +12,10 @@
     <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License">
   </a>
   <a href="https://www.npmjs.com/package/@signhify/cli">
-    <img src="https://img.shields.io/npm/v/@signhify/cli" alt="npm">
+    <img src="https://img.shields.io/npm/v/@signhify/cli?label=cli" alt="npm">
+  </a>
+  <a href="https://github.com/Warriorlegacy/Signhify_CLI/releases">
+    <img src="https://img.shields.io/github/v/release/Warriorlegacy/Signhify_CLI" alt="GitHub Release">
   </a>
   <a href="https://github.com/Warriorlegacy/Signhify_CLI/actions/workflows/test.yml">
     <img src="https://github.com/Warriorlegacy/Signhify_CLI/actions/workflows/test.yml/badge.svg" alt="Test">
@@ -18,6 +25,9 @@
   </a>
   <a href="https://github.com/Warriorlegacy/Signhify_CLI/blob/main/CONTRIBUTING.md">
     <img src="https://img.shields.io/badge/contributions-welcome-brightgreen.svg" alt="Contributions Welcome">
+  </a>
+  <a href="https://github.com/Warriorlegacy/Signhify_CLI/discussions">
+    <img src="https://img.shields.io/github/discussions/Warriorlegacy/Signhify_CLI" alt="GitHub Discussions">
   </a>
 </p>
 
@@ -56,13 +66,13 @@ npx signhify run "explain this codebase" --mode plan
 ### via PowerShell (Windows)
 
 ```powershell
-irm https://signhify.dev/install.ps1 | iex
+irm https://signhify-cli.vercel.app/install.ps1 | iex
 ```
 
 ### via curl (macOS / Linux)
 
 ```bash
-curl -fsSL https://signhify.dev/install.sh | bash
+curl -fsSL https://signhify-cli.vercel.app/install.sh | bash
 ```
 
 ## Getting Started
@@ -104,19 +114,6 @@ signhify --help
 | `/dream` | Distill session into MEMORY.md |
 | `/distill <name>` | Create a reusable agent from this session |
 | `Tab` | Cycle through agent modes |
-
-## Packages
-
-This monorepo contains the following npm packages:
-
-| Package | npm | Description |
-|---|---|---|
-| `@signhify/core` | [![npm](https://img.shields.io/npm/v/@signhify/core)](https://www.npmjs.com/package/@signhify/core) | Agent loop, modes, permissions, context management |
-| `@signhify/providers` | [![npm](https://img.shields.io/npm/v/@signhify/providers)](https://www.npmjs.com/package/@signhify/providers) | Model adapters (OpenAI, Anthropic, Gemini, compatible) |
-| `@signhify/tools` | [![npm](https://img.shields.io/npm/v/@signhify/tools)](https://www.npmjs.com/package/@signhify/tools) | File I/O, shell, git, browser, search, MCP client |
-| `@signhify/memory` | [![npm](https://img.shields.io/npm/v/@signhify/memory)](https://www.npmjs.com/package/@signhify/memory) | SQLite+FTS5 store, checkpoints, dream/distill |
-| `@signhify/cli` | [![npm](https://img.shields.io/npm/v/@signhify/cli)](https://www.npmjs.com/package/@signhify/cli) | CLI (Ink TUI) + non-interactive runner |
-| `@signhify/vscode` | VS Code Marketplace | VS Code extension (chat + autocomplete) |
 
 ## Development
 
@@ -190,6 +187,16 @@ See the [JSON Schema](signhify.config.schema.json) for full options.
 - [GitHub Discussions](https://github.com/Warriorlegacy/Signhify_CLI/discussions) — questions, ideas
 - [Contributing Guide](CONTRIBUTING.md) — how to contribute
 - [Code of Conduct](CODE_OF_CONDUCT.md) — community standards
+
+## Packages on npm
+
+| Package | Version | Description |
+|---|---|---|
+| [`@signhify/core`](https://www.npmjs.com/package/@signhify/core) | [![npm](https://img.shields.io/npm/v/@signhify/core)](https://www.npmjs.com/package/@signhify/core) | Agent loop, modes, permissions, context management |
+| [`@signhify/providers`](https://www.npmjs.com/package/@signhify/providers) | [![npm](https://img.shields.io/npm/v/@signhify/providers)](https://www.npmjs.com/package/@signhify/providers) | OpenAI, Anthropic, Gemini, OpenAI-compatible adapters |
+| [`@signhify/tools`](https://www.npmjs.com/package/@signhify/tools) | [![npm](https://img.shields.io/npm/v/@signhify/tools)](https://www.npmjs.com/package/@signhify/tools) | File I/O, shell, git, search, browser, MCP client |
+| [`@signhify/memory`](https://www.npmjs.com/package/@signhify/memory) | [![npm](https://img.shields.io/npm/v/@signhify/memory)](https://www.npmjs.com/package/@signhify/memory) | SQLite+FTS5, checkpoints, dream/distill engine |
+| [`@signhify/cli`](https://www.npmjs.com/package/@signhify/cli) | [![npm](https://img.shields.io/npm/v/@signhify/cli)](https://www.npmjs.com/package/@signhify/cli) | Terminal TUI (Ink) + non-interactive runner |
 
 ## Security
 

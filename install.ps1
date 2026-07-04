@@ -1,6 +1,6 @@
 #!/usr/bin/env pwsh
 # Signhify Install Script (Windows)
-# Usage: irm https://signhify.dev/install.ps1 | iex
+# Usage: irm https://signhify-cli.vercel.app/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 

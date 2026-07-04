@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Signhify Install Script (macOS / Linux)
-# Usage: curl -fsSL https://signhify.dev/install.sh | bash
+# Usage: curl -fsSL https://signhify-cli.vercel.app/install.sh | bash
 
 set -euo pipefail
 

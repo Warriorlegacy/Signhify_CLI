@@ -3,6 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta property="og:title" content="Signhify — AI Engineering Partner">
+  <meta property="og:description" content="An open-source AI coding agent that plans, writes, tests, and fixes code from natural language.">
+  <meta property="og:image" content="https://signhify-cli.vercel.app/assets/og/signhify-og.png">
+  <meta property="og:url" content="https://signhify-cli.vercel.app">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" type="image/png" href="/assets/logos/signhify-icon.png">
   <title>Signhify — AI Engineering Partner</title>
   <meta name="description" content="An open-source AI coding agent that plans, writes, tests, and fixes code from natural language. Ships as CLI + VS Code extension.">
   <style>
@@ -28,8 +34,7 @@
       display: flex; justify-content: space-between; align-items: center;
       padding: 24px 0; border-bottom: 1px solid #1e293b;
     }
-    nav .logo { font-size: 22px; font-weight: 700; color: #fff; text-decoration: none; }
-    nav .logo span { color: #818cf8; }
+    nav img { display: block; }
     nav .links { display: flex; gap: 24px; align-items: center; }
     nav .links a { color: #94a3b8; text-decoration: none; font-size: 14px; transition: color 0.2s; }
     nav .links a:hover { color: #fff; }
@@ -92,7 +97,9 @@
   <div class="gradient-bg"></div>
   <div class="container">
     <nav>
-      <a href="/" class="logo">signhify<span>.</span></a>
+      <a href="/" class="logo">
+        <img src="/assets/logos/signhify-logo.png" alt="Signhify" height="28">
+      </a>
       <div class="links">
         <a href="https://github.com/Warriorlegacy/Signhify_CLI">GitHub</a>
         <a href="https://github.com/Warriorlegacy/Signhify_CLI/blob/main/README.md">Docs</a>
@@ -101,8 +108,12 @@
     </nav>
 
     <section class="hero">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="/assets/banners/signhify-banner-dark.png">
+        <img src="/assets/banners/signhify-banner.png" alt="Signhify" style="max-width:100%;height:auto;margin-bottom:24px;">
+      </picture>
       <h1>Your <span>AI engineering partner</span><br>in the terminal &amp; IDE</h1>
-      <p>An open-source AI coding agent that plans, writes, tests, and fixes code from natural language — with persistent memory, multi-model support, and CI/CD automation.</p>
+      <p style="margin-top:0;">An open-source AI coding agent that plans, writes, tests, and fixes code from natural language — with persistent memory, multi-model support, and CI/CD automation.</p>
       <div class="badges">
         <img src="https://img.shields.io/github/license/Warriorlegacy/Signhify_CLI" alt="MIT">
         <img src="https://img.shields.io/github/v/release/Warriorlegacy/Signhify_CLI" alt="Release">

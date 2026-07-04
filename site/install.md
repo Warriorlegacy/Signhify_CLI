@@ -1,5 +1,9 @@
 # Install Signhify
 
+<p align="center">
+  <img src="/assets/logos/signhify-logo.png" alt="Signhify" width="320">
+</p>
+
 ## Prerequisites
 
 - Node.js 20+
@@ -21,13 +25,13 @@ npx signhify run "explain this codebase" --mode plan
 ## Windows (PowerShell)
 
 ```powershell
-irm https://signhify.dpdns.org/install.ps1 | iex
+irm https://signhify-cli.vercel.app/install.ps1 | iex
 ```
 
 ## macOS / Linux (curl)
 
 ```bash
-curl -fsSL https://signhify.dpdns.org/install.sh | bash
+curl -fsSL https://signhify-cli.vercel.app/install.sh | bash
 ```
 
 ## From source
