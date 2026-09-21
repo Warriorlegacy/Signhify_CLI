@@ -33,7 +33,7 @@
 
 ---
 
-Signhify is an open-source AI coding agent that plans, writes, tests, and fixes code from natural language. It remembers your project across sessions, runs unattended in CI/CD, and ships as both a **CLI** and a **VS Code extension** sharing one core engine.
+Signhify CLI is an AI-native developer tooling platform that that plans, writes, tests, and fixes code from natural language. It remembers your project across sessions, runs unattended in CI/CD, and ships as both a **CLI** and a **VS Code extension** sharing one core engine.
 
 ## Features
 
