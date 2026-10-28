@@ -13,6 +13,13 @@
         },
         "autocomplete": {
           "$ref": "#/$defs/providerConfig"
+        },
+        "fallbackChain": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/fallbackEndpointConfig"
+          },
+          "description": "Prioritized fallback provider chain for resilient zero-cost model routing."
         }
       }
     },
@@ -43,6 +50,13 @@
           "maximum": 100,
           "default": 80,
           "description": "Context-window usage % that triggers a checkpoint."
+        },
+        "contextLimit": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 2000000,
+          "default": 128000,
+          "description": "Sliding-window active context budget limit in tokens."
         }
       }
     },
@@ -79,12 +93,12 @@
       "properties": {
         "vendor": {
           "type": "string",
-          "enum": ["anthropic", "google", "openai", "openai-compatible"],
+          "enum": ["anthropic", "google", "openai", "openai-compatible", "groq", "xai", "mistral", "cerebras", "togetherai", "perplexity", "mock"],
           "description": "Model vendor identifier."
         },
         "model": {
           "type": "string",
-          "description": "Model identifier (e.g. gpt-4o-mini, claude-3-5-sonnet)."
+          "description": "Model identifier (e.g. gpt-4o-mini, claude-3-5-sonnet, gemini-2.0-flash)."
         },
         "apiKeyRef": {
           "type": "string",
@@ -96,6 +110,37 @@
         }
       },
       "required": ["vendor", "model"]
+    },
+    "fallbackEndpointConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Endpoint identifier name (e.g. 9router-local, google-gemini-free)."
+        },
+        "vendor": {
+          "type": "string",
+          "description": "Model vendor identifier."
+        },
+        "model": {
+          "type": "string",
+          "description": "Model identifier."
+        },
+        "apiKeyRef": {
+          "type": "string",
+          "description": "API key reference or literal key."
+        },
+        "baseUrl": {
+          "type": "string",
+          "description": "Base URL for local or proxy endpoints."
+        },
+        "isLocal": {
+          "type": "boolean",
+          "description": "Whether this endpoint is on localhost."
+        }
+      },
+      "required": ["name", "vendor", "model"]
     },
     "customMode": {
       "type": "object",
@@ -127,16 +172,26 @@
         },
         "command": {
           "type": "string",
-          "description": "Command to spawn the server process."
+          "description": "Command to spawn the server process (stdio transport)."
         },
         "args": {
           "type": "array",
           "items": { "type": "string" },
           "default": [],
           "description": "Arguments passed to the command."
+        },
+        "transport": {
+          "type": "string",
+          "enum": ["stdio", "sse", "http"],
+          "default": "stdio",
+          "description": "MCP transport protocol."
+        },
+        "url": {
+          "type": "string",
+          "description": "URL for remote SSE or HTTP MCP server."
         }
       },
-      "required": ["name", "command"]
+      "required": ["name"]
     }
   }
 }

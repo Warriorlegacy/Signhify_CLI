@@ -29,17 +29,18 @@ describe('ModeManager', () => {
 
   it('should check tool permissions per mode', () => {
     const mm = new ModeManager();
-    expect(mm.isToolAllowed('file-write', 'build')).toBe(true);
-    expect(mm.isToolAllowed('file-write', 'plan')).toBe(false);
+    // file-io is permitted in both build and plan; writes are gated by action.
+    expect(mm.isToolAllowed('file-io', 'build')).toBe(true);
+    expect(mm.isToolAllowed('file-io', 'plan')).toBe(true);
   });
 
   it('should support custom modes', () => {
     const mm = new ModeManager([
-      { name: 'reviewer', prompt: 'Review code', allowedTools: ['file-read', 'search'] },
+      { name: 'reviewer', prompt: 'Review code', allowedTools: ['file-io', 'search'] },
     ]);
     expect(mm.getAvailableModes()).toContain('reviewer');
     mm.setMode('reviewer');
-    expect(mm.isToolAllowed('file-read')).toBe(true);
-    expect(mm.isToolAllowed('file-write')).toBe(false);
+    expect(mm.isToolAllowed('file-io')).toBe(true);
+    expect(mm.isToolAllowed('shell-exec')).toBe(false);
   });
 });

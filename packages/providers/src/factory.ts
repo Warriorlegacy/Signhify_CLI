@@ -1,5 +1,5 @@
 import type { LanguageModel } from 'ai';
-import { createAISDKAdapter, ModelProviderAdapter } from './adapter.js';
+import { createAISDKAdapter, createMockAdapter, ModelProviderAdapter } from './adapter.js';
 
 export interface ProviderFactoryConfig {
   vendor: string;
@@ -177,6 +177,17 @@ const vendors: VendorDef[] = [
 
 export async function createAdapter(config: ProviderFactoryConfig): Promise<ModelProviderAdapter> {
   const vendor = config.vendor.toLowerCase();
+
+  // Hermetic mock provider for tests, CI, and offline operation
+  if (
+    process.env.SIGNHIFY_MOCK_PROVIDER === '1' ||
+    process.env.SIGNHIFY_MOCK_PROVIDER === 'true' ||
+    vendor === 'mock' ||
+    vendor === 'test'
+  ) {
+    return createMockAdapter({ vendor });
+  }
+
   const apiKey = config.apiKey ?? (config.apiKeyEnv ? process.env[config.apiKeyEnv] : undefined) ?? '';
 
   for (const def of vendors) {

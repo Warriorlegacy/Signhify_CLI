@@ -1,203 +1,692 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta property="og:title" content="Signhify — AI Engineering Partner">
-  <meta property="og:description" content="An open-source AI coding agent that plans, writes, tests, and fixes code from natural language.">
+  <meta property="og:title" content="Signhify — AI Engineering Partner in Terminal & IDE">
+  <meta property="og:description" content="Open-source, local-first coding agent with resilient fallback routing, split-pane TUI, SQLite persistent memory, and specialized subagents.">
   <meta property="og:image" content="https://signhify-cli.vercel.app/assets/og/signhify-og.png">
   <meta property="og:url" content="https://signhify-cli.vercel.app">
   <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" type="image/png" href="/assets/logos/signhify-icon.png">
-  <title>Signhify — AI Engineering Partner</title>
-  <meta name="description" content="An open-source AI coding agent that plans, writes, tests, and fixes code from natural language. Ships as CLI + VS Code extension.">
+  <title>Signhify CLI — Autonomous AI Engineering Partner</title>
+  <meta name="description" content="Model-agnostic, zero-cost fallback routing (9router, FreeLLMAPI, Antseed, Gemini, OpenRouter), split-pane TUI, SQLite FTS5 memory, and specialized subagents.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&family=Geist:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
   <style>
+    :root {
+      --bg: #090a0f;
+      --card-bg: #11131b;
+      --card-border: #1e2230;
+      --card-hover: #262c3e;
+      --accent: #6366f1;
+      --accent-violet: #8b5cf6;
+      --accent-cyan: #06b6d4;
+      --accent-green: #10b981;
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+      --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'Geist Mono', 'JetBrains Mono', monospace;
+    }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, system-ui, sans-serif;
-      background: #0f172a;
-      color: #e2e8f0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
       line-height: 1.6;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
     }
-    .gradient-bg {
+    .grid-bg {
       position: fixed;
-      top: -50%;
-      right: -50%;
-      width: 100%;
-      height: 100%;
-      background: radial-gradient(circle at 70% 30%, rgba(99,102,241,0.08) 0%, transparent 50%);
+      inset: 0;
+      background-image: 
+        radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.15) 0%, transparent 60%),
+        linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+      background-size: 100% 100%, 48px 48px, 48px 48px;
       pointer-events: none;
       z-index: 0;
     }
-    .container { max-width: 960px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
-    nav {
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 24px 0; border-bottom: 1px solid #1e293b;
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 24px;
+      position: relative;
+      z-index: 1;
     }
-    nav img { display: block; }
-    nav .links { display: flex; gap: 24px; align-items: center; }
-    nav .links a { color: #94a3b8; text-decoration: none; font-size: 14px; transition: color 0.2s; }
-    nav .links a:hover { color: #fff; }
+    nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20px 0;
+      border-bottom: 1px solid var(--card-border);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 700;
+      font-size: 18px;
+      color: #fff;
+      text-decoration: none;
+    }
+    .brand-badge {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(99, 102, 241, 0.2);
+      border: 1px solid rgba(99, 102, 241, 0.4);
+      color: #a5b4fc;
+    }
+    .nav-links {
+      display: flex;
+      gap: 28px;
+      align-items: center;
+    }
+    .nav-links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: #fff; }
     .btn {
-      display: inline-block; padding: 10px 20px; border-radius: 8px;
-      font-size: 14px; font-weight: 600; text-decoration: none; cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: 1px solid transparent;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: #fff;
+      box-shadow: 0 0 20px rgba(99, 102, 241, 0.35);
+    }
+    .btn-primary:hover {
+      box-shadow: 0 0 28px rgba(99, 102, 241, 0.6);
+      transform: translateY(-1px);
+    }
+    .btn-secondary {
+      background: var(--card-bg);
+      border-color: var(--card-border);
+      color: #fff;
+    }
+    .btn-secondary:hover {
+      border-color: var(--accent);
+      background: var(--card-hover);
+    }
+    .hero {
+      padding: 90px 0 60px;
+      text-align: center;
+    }
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 16px;
+      border-radius: 999px;
+      background: rgba(99, 102, 241, 0.1);
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      color: #c7d2fe;
+      font-size: 13px;
+      margin-bottom: 24px;
+      font-weight: 500;
+    }
+    .hero h1 {
+      font-size: 58px;
+      font-weight: 800;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+      margin-bottom: 20px;
+    }
+    .gradient-text {
+      background: linear-gradient(135deg, #fff 30%, #818cf8 70%, #c084fc 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero p {
+      font-size: 19px;
+      color: var(--text-muted);
+      max-width: 760px;
+      margin: 0 auto 36px;
+      line-height: 1.6;
+    }
+    .install-box {
+      max-width: 680px;
+      margin: 0 auto 40px;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+    }
+    .tab-header {
+      display: flex;
+      background: #0d0f17;
+      border-bottom: 1px solid var(--card-border);
+    }
+    .tab-btn {
+      padding: 10px 18px;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
       transition: all 0.2s;
     }
-    .btn-primary { background: #6366f1; color: #fff; }
-    .btn-primary:hover { background: #4f46e5; }
-    .btn-outline {
-      background: transparent; color: #818cf8; border: 1px solid #818cf8;
+    .tab-btn.active {
+      color: #fff;
+      border-bottom-color: var(--accent);
+      background: rgba(99, 102, 241, 0.05);
     }
-    .btn-outline:hover { background: rgba(99,102,241,0.1); }
-    .hero {
-      padding: 100px 0 80px; text-align: center;
+    .code-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      font-family: var(--font-mono);
+      font-size: 14px;
     }
-    .hero h1 { font-size: 56px; font-weight: 800; line-height: 1.1; margin-bottom: 16px; }
-    .hero h1 span { background: linear-gradient(135deg, #818cf8, #c084fc); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-    .hero p { font-size: 18px; color: #94a3b8; max-width: 600px; margin: 0 auto 32px; }
-    .hero .actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
-    .hero .actions .btn { font-size: 16px; padding: 14px 28px; }
-    .install-section {
-      background: #1e293b; border-radius: 12px; padding: 40px; margin: 40px 0;
+    .code-cmd {
+      color: #a5b4fc;
+      overflow-x: auto;
+      white-space: nowrap;
     }
-    .install-section h2 { font-size: 20px; margin-bottom: 16px; color: #fff; }
-    .install-section code {
-      display: block; padding: 16px; background: #0f172a; border-radius: 8px;
-      font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 14px;
-      color: #a5b4fc; margin-bottom: 12px; overflow-x: auto;
+    .copy-btn {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s;
     }
-    .install-section .copy-hint { font-size: 13px; color: #64748b; }
-    .features {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 24px; margin: 60px 0;
+    .copy-btn:hover {
+      background: rgba(99,102,241,0.2);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    /* Terminal Preview Mockup */
+    .terminal-container {
+      max-width: 1060px;
+      margin: 40px auto 80px;
+      background: #0c0e14;
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.7);
+      overflow: hidden;
+    }
+    .terminal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 18px;
+      background: #11131b;
+      border-bottom: 1px solid var(--card-border);
+    }
+    .window-dots {
+      display: flex;
+      gap: 8px;
+    }
+    .dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+    }
+    .dot-red { background: #ef4444; }
+    .dot-yellow { background: #eab308; }
+    .dot-green { background: #22c55e; }
+    .terminal-title {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .terminal-body {
+      display: grid;
+      grid-template-columns: 68% 32%;
+      min-height: 440px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+    }
+    .main-pane {
+      padding: 20px;
+      border-right: 1px solid var(--card-border);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .sidebar-pane {
+      padding: 20px;
+      background: #0d0f17;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .terminal-line {
+      margin-bottom: 8px;
+      line-height: 1.5;
+    }
+    .prompt-user { color: #60a5fa; font-weight: 600; }
+    .prompt-ai { color: #34d399; font-weight: 600; }
+    .prompt-system { color: #fbbf24; }
+    .diff-add { color: #4ade80; background: rgba(74, 222, 128, 0.1); padding: 1px 4px; border-radius: 2px; }
+    .diff-del { color: #f87171; background: rgba(248, 113, 113, 0.1); padding: 1px 4px; border-radius: 2px; }
+    .status-badge {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .badge-build { background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3); }
+    .badge-plan { background: rgba(6, 182, 212, 0.15); color: #38bdf8; border: 1px solid rgba(6, 182, 212, 0.3); }
+    .progress-bar {
+      height: 6px;
+      background: #1e293b;
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 6px;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #10b981, #6366f1);
+      width: 62%;
+    }
+    /* Features Grid */
+    .section-title {
+      text-align: center;
+      margin-bottom: 48px;
+    }
+    .section-title h2 {
+      font-size: 38px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 12px;
+    }
+    .section-title p {
+      color: var(--text-muted);
+      font-size: 16px;
+    }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 24px;
+      margin-bottom: 80px;
     }
     .feature-card {
-      background: #1e293b; border: 1px solid #334155; border-radius: 12px;
-      padding: 28px; transition: border-color 0.2s;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 28px;
+      transition: all 0.25s;
     }
-    .feature-card:hover { border-color: #6366f1; }
-    .feature-card .icon { font-size: 28px; margin-bottom: 12px; }
-    .feature-card h3 { font-size: 16px; font-weight: 600; margin-bottom: 8px; color: #fff; }
-    .feature-card p { font-size: 14px; color: #94a3b8; }
-    .footer {
-      text-align: center; padding: 48px 0; border-top: 1px solid #1e293b;
-      margin-top: 60px; color: #64748b; font-size: 14px;
+    .feature-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
     }
-    .footer a { color: #818cf8; text-decoration: none; }
-    .footer a:hover { text-decoration: underline; }
-    .badges { display: flex; gap: 8px; justify-content: center; margin: 20px 0; flex-wrap: wrap; }
-    .badges img { height: 22px; border-radius: 4px; }
-    @media (max-width: 640px) {
-      .hero h1 { font-size: 36px; }
-      nav .links { gap: 12px; }
+    .feature-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      margin-bottom: 18px;
+      background: rgba(99, 102, 241, 0.12);
+      border: 1px solid rgba(99, 102, 241, 0.3);
+    }
+    .feature-card h3 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #fff;
+    }
+    .feature-card p {
+      color: var(--text-muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    /* Table */
+    .comparison-table-wrapper {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      overflow-x: auto;
+      margin-bottom: 80px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+      text-align: left;
+    }
+    th, td {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--card-border);
+    }
+    th {
+      color: var(--text-muted);
+      background: #0d0f17;
+      font-weight: 600;
+    }
+    td:first-child { font-weight: 600; color: #fff; }
+    .col-highlight {
+      background: rgba(99, 102, 241, 0.04);
+      color: #a5b4fc;
+      font-weight: 600;
+    }
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--card-border);
+      padding: 50px 0;
+      color: var(--text-muted);
+      font-size: 14px;
+      text-align: center;
+    }
+    footer a {
+      color: #818cf8;
+      text-decoration: none;
+    }
+    footer a:hover { text-decoration: underline; }
+    @media (max-width: 768px) {
+      .hero h1 { font-size: 38px; }
+      .terminal-body { grid-template-columns: 1fr; }
+      .sidebar-pane { border-top: 1px solid var(--card-border); }
+      .nav-links { display: none; }
     }
   </style>
 </head>
 <body>
-  <div class="gradient-bg"></div>
+  <div class="grid-bg"></div>
   <div class="container">
     <nav>
-      <a href="/" class="logo">
-        <img src="/assets/logos/signhify-logo.png" alt="Signhify" height="28">
+      <a href="/" class="brand">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="16 18 22 12 16 6"></polyline>
+          <polyline points="8 6 2 12 8 18"></polyline>
+        </svg>
+        Signhify CLI
+        <span class="brand-badge">v0.2.0 • Open-Source</span>
       </a>
-      <div class="links">
-        <a href="https://github.com/Warriorlegacy/Signhify_CLI">GitHub</a>
-        <a href="https://github.com/Warriorlegacy/Signhify_CLI/blob/main/README.md">Docs</a>
-        <a href="https://github.com/Warriorlegacy/Signhify_CLI/discussions">Community</a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#router">Zero-Cost Router</a>
+        <a href="#subagents">Subagents</a>
+        <a href="#compare">Comparison</a>
+        <a href="https://github.com/Warriorlegacy/Signhify_CLI" target="_blank">GitHub</a>
       </div>
+      <a href="https://github.com/Warriorlegacy/Signhify_CLI" class="btn btn-secondary">
+        ⭐ Star on GitHub
+      </a>
     </nav>
 
-    <section class="hero">
-      <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="/assets/banners/signhify-banner-dark.png">
-        <img src="/assets/banners/signhify-banner.png" alt="Signhify" style="max-width:100%;height:auto;margin-bottom:24px;">
-      </picture>
-      <h1>Your <span>AI engineering partner</span><br>in the terminal &amp; IDE</h1>
-      <p style="margin-top:0;">An open-source AI coding agent that plans, writes, tests, and fixes code from natural language — with persistent memory, multi-model support, and CI/CD automation.</p>
-      <div class="badges">
-        <img src="https://img.shields.io/github/license/Warriorlegacy/Signhify_CLI" alt="MIT">
-        <img src="https://img.shields.io/github/v/release/Warriorlegacy/Signhify_CLI" alt="Release">
-        <img src="https://img.shields.io/github/actions/workflow/status/Warriorlegacy/Signhify_CLI/test.yml" alt="CI">
+    <header class="hero">
+      <div class="hero-badge">
+        <span>⚡ 100% Free Inference Fallback • Split-Pane TUI • SQLite Memory</span>
       </div>
-      <div class="actions">
-        <a href="https://github.com/Warriorlegacy/Signhify_CLI" class="btn btn-primary">View on GitHub</a>
-        <a href="https://github.com/Warriorlegacy/Signhify_CLI/blob/main/CONTRIBUTING.md" class="btn btn-outline">Contribute</a>
+      <h1>Your Autonomous <span class="gradient-text">AI Engineering Partner</span><br>in the Terminal &amp; IDE</h1>
+      <p>
+        Signhify CLI bridges the gap between terminal execution and editor intelligence. Featuring a prioritized multi-provider fallback router (9router, FreeLLMAPI, Antseed, Gemini, OpenRouter), dual SQLite FTS5 memory, and specialized subagents.
+      </p>
+
+      <div class="install-box">
+        <div class="tab-header">
+          <button class="tab-btn active" onclick="switchTab('curl', 'curl -fsSL https://signhify-cli.vercel.app/install.sh | bash')">curl</button>
+          <button class="tab-btn" onclick="switchTab('powershell', 'irm https://signhify-cli.vercel.app/install.ps1 | iex')">PowerShell (irm)</button>
+          <button class="tab-btn" onclick="switchTab('npm', 'npm install -g @signhify/cli')">npm</button>
+          <button class="tab-btn" onclick="switchTab('pnpm', 'pnpm add -g @signhify/cli')">pnpm</button>
+          <button class="tab-btn" onclick="switchTab('bun', 'bun add -g @signhify/cli')">bun</button>
+        </div>
+        <div class="code-row">
+          <span class="code-cmd" id="cmd-display">curl -fsSL https://signhify-cli.vercel.app/install.sh | bash</span>
+          <button class="copy-btn" id="copy-btn" onclick="copyCommand()">
+            <span>Copy</span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Terminal Preview Mockup -->
+    <div class="terminal-container">
+      <div class="terminal-header">
+        <div class="window-dots">
+          <div class="dot dot-red"></div>
+          <div class="dot dot-yellow"></div>
+          <div class="dot dot-green"></div>
+        </div>
+        <div class="terminal-title">signhify — split-pane terminal user interface</div>
+        <div style="font-size: 11px; color: #64748b; font-family: var(--font-mono);">Tab: toggle mode • Ctrl+B: toggle drawer</div>
+      </div>
+      <div class="terminal-body">
+        <div class="main-pane">
+          <div>
+            <div class="terminal-line" style="display: flex; gap: 8px; align-items: center; margin-bottom: 14px;">
+              <span class="status-badge badge-build">BUILD MODE</span>
+              <span style="color: #64748b;">Router: 9router (20128) • 580 tok/s</span>
+            </div>
+            <div class="terminal-line">
+              <span class="prompt-user">You: </span>Add resilient fallback routing to Google Gemini Studio if 9router port 20128 returns 429
+            </div>
+            <div class="terminal-line">
+              <span class="prompt-system">System: </span>[FallbackRouter] Probing local endpoints... 9router active. Configuring cascade chain.
+            </div>
+            <div class="terminal-line">
+              <span class="prompt-ai">AI: </span>I have analyzed the provider adapter architecture. Generating atomic diff in <code>packages/providers/src/fallback-router.ts</code>:
+            </div>
+            <div class="terminal-line" style="margin: 12px 0;">
+              <div class="diff-add">+ export class FallbackRouter implements ModelProviderAdapter {</div>
+              <div class="diff-add">+   private circuitBreakers = new Map&lt;string, CircuitBreakerStatus&gt;();</div>
+              <div class="diff-add">+   async *streamChat(params) { /* cascades across 9router -> Gemini -> OpenRouter */ }</div>
+              <div class="diff-del">- const singleAdapter = await createAdapter(config.provider);</div>
+            </div>
+            <div class="terminal-line">
+              <span class="prompt-ai">AI: </span>All 15 provider tests pass hermetically. Verifying stop condition.
+            </div>
+          </div>
+          <div style="border-top: 1px solid var(--card-border); padding-top: 12px; color: #a5b4fc;">
+            › Type a task, /goal &lt;statement&gt;, /context-limit &lt;tokens&gt;, or /exit...
+          </div>
+        </div>
+
+        <div class="sidebar-pane">
+          <div>
+            <div style="font-weight: 700; color: #38bdf8; font-size: 12px; margin-bottom: 4px;">CONTEXT &amp; MEMORY</div>
+            <div style="color: #94a3b8; font-size: 12px;">Usage: 76.8k / 128k tokens</div>
+            <div class="progress-bar">
+              <div class="progress-fill"></div>
+            </div>
+            <div style="font-size: 10px; color: #64748b; margin-top: 4px;">Auto-compact at 80%</div>
+          </div>
+
+          <div>
+            <div style="font-weight: 700; color: #fbbf24; font-size: 12px; margin-bottom: 6px;">ACTIVE ROUTER</div>
+            <div style="font-size: 12px; color: #4ade80;">● 9router-local (port 20128)</div>
+            <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Fallback: Gemini Studio Free</div>
+          </div>
+
+          <div>
+            <div style="font-weight: 700; color: #c084fc; font-size: 12px; margin-bottom: 6px;">MCP SERVERS</div>
+            <div style="font-size: 12px; color: #4ade80;">● rea (reverse-engineer)</div>
+            <div style="font-size: 12px; color: #4ade80;">● supabase-mcp</div>
+            <div style="font-size: 12px; color: #4ade80;">● cloudflare-builds</div>
+          </div>
+
+          <div>
+            <div style="font-weight: 700; color: #60a5fa; font-size: 12px; margin-bottom: 6px;">TASK TREE</div>
+            <div style="font-size: 11px; color: #4ade80;">✔ T1: Provider Audit</div>
+            <div style="font-size: 11px; color: #fbbf24; margin-left: 8px;">↳ T1.1: Fallback Router</div>
+            <div style="font-size: 11px; color: #64748b; margin-left: 8px;">↳ T1.2: CI Tests</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Features Section -->
+    <section id="features" style="padding: 60px 0;">
+      <div class="section-title">
+        <h2>Engineered for Frontier Developer Experience</h2>
+        <p>A transparent, configurable, local-first coding agent built for real-world software engineering.</p>
+      </div>
+
+      <div class="grid-3">
+        <div class="feature-card">
+          <div class="feature-icon">🛡️</div>
+          <h3>Resilient Zero-Cost Fallback Chain</h3>
+          <p>Native out-of-the-box priority routing across 9router (port 20128), FreeLLMAPI-Local (port 31415), Antseed, Gemini Studio Free, and OpenRouter Free. Automatically circuit-breaks on 429/402 without burning money.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">🧠</div>
+          <h3>Dual-Store SQLite FTS5 Memory</h3>
+          <p>Sub-millisecond semantic retrieval via SQLite FTS5 paired with human-auditable markdown files (<code>.signhify/MEMORY.md</code> and <code>checkpoint.md</code>). Remembers decisions, conventions, and task progress.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">🎛️</div>
+          <h3>Split-Pane Terminal UI</h3>
+          <p>Powered by Ink v5. Full split-pane layout matching OpenCode: live conversational chat and diff preview on the left, real-time context token meter, router latency, MCP status, and task tree on the right.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">🤖</div>
+          <h3>Specialized Subagent Spawning</h3>
+          <p>Delegates focused tasks to specialized generator-based subagents: <code>@FilePicker</code> (AST scoping), <code>@Planner</code> (task decomposition), <code>@Editor</code> (atomic patching), and <code>@Reviewer</code> (test verification).</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">⚡</div>
+          <h3>Sliding-Window Context Compaction</h3>
+          <p>Dynamic token monitoring with <code>/context-limit</code> controls. Automatically triggers episodic checkpoints at 80% context utilization, ensuring the model never hallucinates or exceeds token limits.</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-icon">🔌</div>
+          <h3>Native MCP Client &amp; Presets</h3>
+          <p>Full support for Model Context Protocol (stdio + SSE/HTTP). Pre-configured out of the box for <code>rea</code> (Reverse Engineer Anything), <code>cloudflare</code>, <code>supabase</code>, and <code>openseo</code>.</p>
+        </div>
       </div>
     </section>
 
-    <div class="install-section">
-      <h2>Quick Install</h2>
-      <code>npm install -g @signhify/cli</code>
-      <div class="copy-hint">Then run <code style="display:inline;padding:2px 6px;background:#334155;">signhify wizard</code> for first-time setup.</div>
-    </div>
+    <!-- Comparison Table -->
+    <section id="compare" style="padding: 40px 0 80px;">
+      <div class="section-title">
+        <h2>Comparison Matrix vs Reference Tools</h2>
+        <p>How Signhify CLI stacks up against other leading open coding agents.</p>
+      </div>
 
-    <div class="features">
-      <div class="feature-card">
-        <div class="icon">🤖</div>
-        <h3>Multi-Agent Modes</h3>
-        <p>Build (full access), Plan (read-only), Debug, and Compose modes with per-mode tool permissions.</p>
+      <div class="comparison-table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Capability</th>
+              <th class="col-highlight">Signhify CLI</th>
+              <th>OpenCode</th>
+              <th>FreeBuff</th>
+              <th>Kilo Code</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Default Inference Cost</td>
+              <td class="col-highlight">$0 (Local / Free Fallback Chain)</td>
+              <td>BYOK / API Keys</td>
+              <td>Ad-funded Freebucks</td>
+              <td>BYOK / Kilo Gateway</td>
+            </tr>
+            <tr>
+              <td>Local Proxy Router (9router / 31415)</td>
+              <td class="col-highlight">Native Auto-Discovery</td>
+              <td>Manual Config</td>
+              <td>Unsupported</td>
+              <td>Manual Config</td>
+            </tr>
+            <tr>
+              <td>Split-Pane TUI with Sidebar</td>
+              <td class="col-highlight">Ink v5 (Context Meter + Task Tree)</td>
+              <td>BubbleTea / OpenTUI</td>
+              <td>Single-Pane Chat</td>
+              <td>CLI + IDE Extension</td>
+            </tr>
+            <tr>
+              <td>Persistent Cross-Session Memory</td>
+              <td class="col-highlight">SQLite FTS5 + MEMORY.md</td>
+              <td>Git Snapshots (/undo)</td>
+              <td>knowledge.md</td>
+              <td>AGENTS.md Memory Bank</td>
+            </tr>
+            <tr>
+              <td>Multi-Agent Specialized Spawning</td>
+              <td class="col-highlight">@FilePicker, @Planner, @Editor</td>
+              <td>@general subagent</td>
+              <td>Multi-Agent Pipeline</td>
+              <td>Sub-agent Delegation</td>
+            </tr>
+            <tr>
+              <td>MCP Ecosystem Presets</td>
+              <td class="col-highlight">rea, cloudflare, supabase, openseo</td>
+              <td>Custom Config</td>
+              <td>.agents/mcp.json</td>
+              <td>Custom Config</td>
+            </tr>
+            <tr>
+              <td>CI/CD Scripted Automation</td>
+              <td class="col-highlight">--auto --output json</td>
+              <td>GitHub Actions integration</td>
+              <td>Unsupported</td>
+              <td>Cloud Agent API</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
-      <div class="feature-card">
-        <div class="icon">🧠</div>
-        <h3>Persistent Memory</h3>
-        <p>SQLite + FTS5 with automatic checkpoints and dream/distill self-improvement. Remembers your project across sessions.</p>
-      </div>
-      <div class="feature-card">
-        <div class="icon">🔌</div>
-        <h3>Multi-Provider</h3>
-        <p>OpenAI, Anthropic Claude, Google Gemini, or any OpenAI-compatible endpoint. Bring your own key.</p>
-      </div>
-      <div class="feature-card">
-        <div class="icon">⚡</div>
-        <h3>Two-Tier Model Routing</h3>
-        <p>Fast model for inline autocomplete, reasoning model for the agent loop — configured independently.</p>
-      </div>
-      <div class="feature-card">
-        <div class="icon">🎯</div>
-        <h3>Goal/Judge Verification</h3>
-        <p>Set a stop condition like "all tests pass" — verified by an independent model before the session terminates.</p>
-      </div>
-      <div class="feature-card">
-        <div class="icon">🔄</div>
-        <h3>CI/CD Mode</h3>
-        <p>Run with <code>--auto --output json</code> for scripted pipelines. Structured JSON output with exit codes.</p>
-      </div>
-      <div class="feature-card">
-        <div class="icon">🔍</div>
-        <h3>VS Code Extension</h3>
-        <p>Full chat panel + inline autocomplete. Shares the same core engine as the CLI.</p>
-      </div>
-      <div class="feature-card">
-        <div class="icon">🧩</div>
-        <h3>MCP Extensible</h3>
-        <p>Model Context Protocol client for custom tools, resources, and prompts from third-party servers.</p>
-      </div>
-    </div>
+    </section>
 
-    <div class="install-section">
-      <h2>Packages</h2>
-      <table style="width:100%;border-collapse:collapse;font-size:14px;">
-        <thead>
-          <tr style="border-bottom:1px solid #334155;">
-            <th style="padding:8px 12px;text-align:left;color:#94a3b8;">Package</th>
-            <th style="padding:8px 12px;text-align:left;color:#94a3b8;">Description</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr style="border-bottom:1px solid #1e293b;"><td style="padding:8px 12px;color:#a5b4fc;">@signhify/core</td><td style="padding:8px 12px;color:#94a3b8;">Agent loop, modes, permissions, context management</td></tr>
-          <tr style="border-bottom:1px solid #1e293b;"><td style="padding:8px 12px;color:#a5b4fc;">@signhify/providers</td><td style="padding:8px 12px;color:#94a3b8;">OpenAI, Anthropic, Gemini, OpenAI-compatible adapters</td></tr>
-          <tr style="border-bottom:1px solid #1e293b;"><td style="padding:8px 12px;color:#a5b4fc;">@signhify/tools</td><td style="padding:8px 12px;color:#94a3b8;">File I/O, shell, git, search, browser, MCP client</td></tr>
-          <tr style="border-bottom:1px solid #1e293b;"><td style="padding:8px 12px;color:#a5b4fc;">@signhify/memory</td><td style="padding:8px 12px;color:#94a3b8;">SQLite+FTS5, checkpoints, dream/distill engine</td></tr>
-          <tr style="border-bottom:1px solid #1e293b;"><td style="padding:8px 12px;color:#a5b4fc;">@signhify/cli</td><td style="padding:8px 12px;color:#94a3b8;">Terminal TUI (Ink) + non-interactive runner</td></tr>
-          <tr><td style="padding:8px 12px;color:#a5b4fc;">@signhify/vscode</td><td style="padding:8px 12px;color:#94a3b8;">VS Code extension with chat + autocomplete</td></tr>
-        </tbody>
-      </table>
-    </div>
-
-    <footer class="footer">
-      <p>MIT License — <a href="https://github.com/Warriorlegacy/Signhify_CLI">GitHub</a> · <a href="https://github.com/Warriorlegacy/Signhify_CLI/blob/main/SECURITY.md">Security</a> · <a href="https://github.com/Warriorlegacy/Signhify_CLI/blob/main/CONTRIBUTING.md">Contribute</a></p>
-      <p style="margin-top:8px;">Built by the Signhify community</p>
+    <footer>
+      <p>Signhify CLI is open-source under the MIT License.</p>
+      <p style="margin-top: 8px;">
+        <a href="https://github.com/Warriorlegacy/Signhify_CLI">GitHub Repository</a> • 
+        <a href="https://github.com/Warriorlegacy/Signhify_CLI/blob/main/Signhify_PRD.md">PRD Spec</a> • 
+        <a href="https://github.com/Warriorlegacy/Signhify_CLI/blob/main/Signhify_TRD.md">TRD Architecture</a> • 
+        <a href="https://github.com/Warriorlegacy/Signhify_CLI/blob/main/SECURITY.md">Security Model</a>
+      </p>
     </footer>
   </div>
+
+  <script>
+    function switchTab(type, cmd) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      event.target.classList.add('active');
+      document.getElementById('cmd-display').textContent = cmd;
+    }
+
+    function copyCommand() {
+      const text = document.getElementById('cmd-display').textContent;
+      navigator.clipboard.writeText(text);
+      const btn = document.getElementById('copy-btn');
+      btn.innerHTML = '<span>Copied! ✔</span>';
+      setTimeout(() => {
+        btn.innerHTML = '<span>Copy</span>';
+      }, 2000);
+    }
+  </script>
 </body>
 </html>

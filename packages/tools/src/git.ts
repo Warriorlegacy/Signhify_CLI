@@ -1,5 +1,11 @@
 import { ToolHandler } from './tool-handler.js';
-import simpleGit, { SimpleGit } from 'simple-git';
+import * as simpleGitModule from 'simple-git';
+import type { SimpleGit } from 'simple-git';
+
+// simple-git is CJS: under Node16 ESM interop the callable lands on `.default`.
+// shortcut: assumes esModuleInterop's cjs default interop; if a future simple-git ships ESM, call the namespace directly.
+const simpleGit = (simpleGitModule as unknown as { default?: typeof simpleGitModule.simpleGit }).default
+  ?? simpleGitModule.simpleGit;
 
 function getGit(workingDirectory: string): SimpleGit {
   return simpleGit(workingDirectory);

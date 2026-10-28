@@ -32,6 +32,30 @@ export interface McpPrompt {
   arguments?: Array<{ name: string; description?: string; required?: boolean }>;
 }
 
+export const BUILT_IN_MCP_PRESETS: Record<string, { command: string; args: string[]; description: string }> = {
+  rea: {
+    command: 'npx',
+    args: ['-y', 'rea-agents@latest', 'serve'],
+    description: 'Reverse-Engineer-Anything MCP server for runtime code & web inspection',
+  },
+  cloudflare: {
+    command: 'npx',
+    args: ['-y', '@cloudflare/mcp-server-cloudflare'],
+    description: 'Cloudflare Workers, Pages, and DNS integration',
+  },
+  supabase: {
+    command: 'npx',
+    args: ['-y', '@supabase/mcp-server'],
+    description: 'Supabase database inspection, migrations, and edge functions',
+  },
+  openseo: {
+    command: 'npx',
+    args: ['-y', 'openseo-mcp@latest'],
+    description: 'Search query intelligence and web page SEO auditor',
+  },
+};
+
+
 interface McpConnection {
   process: ChildProcess;
   tools: Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>;
@@ -116,6 +140,16 @@ async function createConnection(
 
       (child as unknown as { _jsonBuffer?: string })._jsonBuffer = '';
 
+      // spawn reports ENOENT/EACCES asynchronously on 'error'. Without this
+      // listener the failure is unhandled and the pending initialize request
+      // waits out its timeout instead of failing fast.
+      const spawnError = new Promise<never>((_, reject) => {
+        child.once('error', (err) => reject(err));
+      });
+      spawnError.catch(() => {
+        // observed by the race below; keeps Node from reporting it as unhandled
+      });
+
       const conn: McpConnection = {
         process: child,
         tools: [],
@@ -139,16 +173,19 @@ async function createConnection(
         connections.delete(serverName);
       });
 
-      await sendRequest(conn, {
-        jsonrpc: '2.0',
-        id: nextRequestId(conn),
-        method: 'initialize',
-        params: {
-          protocolVersion: '2025-03-26',
-          capabilities: {},
-          clientInfo: { name: 'signhify', version: '0.1.0' },
-        },
-      });
+      await Promise.race([
+        sendRequest(conn, {
+          jsonrpc: '2.0',
+          id: nextRequestId(conn),
+          method: 'initialize',
+          params: {
+            protocolVersion: '2025-03-26',
+            capabilities: {},
+            clientInfo: { name: 'signhify', version: '0.1.0' },
+          },
+        }),
+        spawnError,
+      ]);
 
       const toolsResponse = await sendRequest(conn, {
         jsonrpc: '2.0',
@@ -227,13 +264,37 @@ export const mcpClientTool: ToolHandler = {
 
     try {
       switch (action) {
+        case 'list-presets': {
+          return JSON.stringify({
+            presets: Object.entries(BUILT_IN_MCP_PRESETS).map(([key, val]) => ({
+              preset: key,
+              command: val.command,
+              args: val.args,
+              description: val.description,
+            })),
+          });
+        }
+
         case 'connect': {
           if (connections.has(serverName)) {
             return JSON.stringify({ error: `Already connected to ${serverName}. Disconnect first.` });
           }
 
-          const command = args.command as string;
-          const commandArgs = (args.args as string[]) ?? [];
+          let command = args.command as string | undefined;
+          let commandArgs = (args.args as string[]) ?? [];
+
+          // Check if serverName matches a preset
+          if (!command && serverName in BUILT_IN_MCP_PRESETS) {
+            const preset = BUILT_IN_MCP_PRESETS[serverName];
+            command = preset.command;
+            commandArgs = preset.args;
+          }
+
+          if (!command) {
+            return JSON.stringify({
+              error: `No command specified for server "${serverName}" and no matching preset found.`,
+            });
+          }
 
           const conn = await createConnection(serverName, command, commandArgs);
 
@@ -335,4 +396,61 @@ export async function listMcpPrompts(serverName: string): Promise<McpPrompt[]> {
   const conn = connections.get(serverName);
   if (!conn) return [];
   return conn.prompts;
+}
+
+export type McpStatus = 'connected' | 'failed' | 'disabled';
+
+export interface McpServerStatus {
+  name: string;
+  status: McpStatus;
+  toolCount?: number;
+  error?: string;
+}
+
+// Tracked separately from `connections` so a failed server keeps its reason
+// instead of vanishing into an empty list.
+const statuses = new Map<string, McpServerStatus>();
+
+export function getMcpStatuses(): McpServerStatus[] {
+  return Array.from(statuses.values());
+}
+
+/**
+ * Connect configured servers for display purposes. Never throws and never
+ * invents a server: anything that does not connect is reported as `failed`
+ * with the reason, so the UI cannot imply a permission that does not exist.
+ */
+export async function connectMcpServers(
+  servers: Array<{ name: string; command?: string; args?: string[] }>,
+  workingDirectory: string
+): Promise<McpServerStatus[]> {
+  for (const server of servers) {
+    if (!server.command) {
+      statuses.set(server.name, {
+        name: server.name,
+        status: 'failed',
+        error: 'no command configured',
+      });
+      continue;
+    }
+
+    try {
+      // createConnection registers the connection itself on success.
+      const conn = await createConnection(server.name, server.command, server.args ?? []);
+      statuses.set(server.name, {
+        name: server.name,
+        status: 'connected',
+        toolCount: conn.tools.length,
+      });
+    } catch (error) {
+      statuses.set(server.name, {
+        name: server.name,
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  void workingDirectory; // reserved for per-project server config
+  return getMcpStatuses();
 }

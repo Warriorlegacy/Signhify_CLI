@@ -39,15 +39,16 @@ describe('AgentLoop', () => {
     expect(loop.getToolDefinitions()[0].name).toBe('mock-tool');
   });
 
-  it('should deny tools not in current mode', async () => {
+  it('should deny writes but allow reads in plan mode', async () => {
     const loop = new AgentLoop({
       config: mockConfig,
       workingDirectory: '/tmp/test',
     });
 
     loop.getModeManager().setMode('plan');
-    const permission = loop.getPermissionEngine().canUseTool('file-write');
-    expect(permission.allowed).toBe(false);
+    // Tool-level: allowed. Action-level write: denied.
+    expect(loop.getPermissionEngine().canUseTool('file-io').allowed).toBe(true);
+    expect(loop.getPermissionEngine().canPerformFileAction('file-io', 'write').allowed).toBe(false);
   });
 
   it('should allow tools in build mode', async () => {
@@ -57,7 +58,7 @@ describe('AgentLoop', () => {
     });
 
     loop.getModeManager().setMode('build');
-    const permission = loop.getPermissionEngine().canUseTool('file-write');
+    const permission = loop.getPermissionEngine().canUseTool('file-io');
     expect(permission.allowed).toBe(true);
   });
 

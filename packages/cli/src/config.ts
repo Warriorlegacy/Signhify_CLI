@@ -22,8 +22,15 @@ const KEYTAR_SERVICE = "signhify";
 const DEFAULT_CONFIG: SignhifyConfig = {
   provider: {
     agent: { vendor: "openai", model: "gpt-4", apiKeyRef: "env:OPENAI_API_KEY" },
+    fallbackChain: [
+      { name: "9router-local", vendor: "openai-compatible", baseUrl: "http://127.0.0.1:20128/v1", model: "gemini-2.0-flash", isLocal: true },
+      { name: "freellmapi-local", vendor: "openai-compatible", baseUrl: "http://127.0.0.1:31415/v1", model: "default", isLocal: true },
+      { name: "google-gemini-free", vendor: "google", model: "gemini-2.0-flash", apiKeyRef: "env:GEMINI_API_KEY" },
+      { name: "groq-cloud", vendor: "groq", model: "llama-3.3-70b-versatile", apiKeyRef: "env:GROQ_API_KEY" },
+      { name: "openrouter-free", vendor: "openai-compatible", baseUrl: "https://openrouter.ai/api/v1", model: "meta-llama/llama-3.3-70b-instruct:free", apiKeyRef: "env:OPENROUTER_API_KEY" },
+    ],
   },
-  memory: { tokenBudget: 4000, checkpointThresholdPct: 80 },
+  memory: { tokenBudget: 4000, checkpointThresholdPct: 80, contextLimit: 128000 },
 };
 
 export async function signhifyConfigSchema(config: SignhifyConfig): Promise<SignhifyConfig> {
@@ -43,6 +50,18 @@ export async function signhifyConfigSchema(config: SignhifyConfig): Promise<Sign
     if (ac && ac.vendor === 'openai-compatible' && !ac.baseUrl) {
       errors.push('openai-compatible autocomplete provider requires baseUrl');
     }
+
+    if (config.provider.fallbackChain) {
+      if (!Array.isArray(config.provider.fallbackChain)) {
+        errors.push('provider.fallbackChain must be an array');
+      } else {
+        for (const ep of config.provider.fallbackChain) {
+          if (!ep.name || !ep.vendor || !ep.model) {
+            errors.push('Each fallbackChain entry requires name, vendor, and model');
+          }
+        }
+      }
+    }
   }
 
   if (config.memory) {
@@ -53,6 +72,10 @@ export async function signhifyConfigSchema(config: SignhifyConfig): Promise<Sign
     const threshold = config.memory.checkpointThresholdPct;
     if (threshold !== undefined && (threshold < 1 || threshold > 99)) {
       errors.push(`memory.checkpointThresholdPct must be between 1 and 99, got ${threshold}`);
+    }
+    const limit = config.memory.contextLimit;
+    if (limit !== undefined && (limit < 1000 || limit > 2000000)) {
+      errors.push(`memory.contextLimit must be between 1000 and 2000000, got ${limit}`);
     }
   }
 

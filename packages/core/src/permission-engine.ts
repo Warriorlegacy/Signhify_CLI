@@ -61,6 +61,18 @@ export class PermissionEngine {
     return { allowed: true };
   }
 
+  /**
+   * Write intent arrives through the `file-io` tool's `action`, so the tool-level
+   * allowlist cannot distinguish a read from a write. Enforce it here instead of
+   * blocking the whole tool, which would make plan mode unable to read files.
+   */
+  canPerformFileAction(toolName: string, action: string): PermissionCheck {
+    if (toolName === 'file-io' && action !== 'read' && action !== 'list') {
+      return this.canWriteFile('');
+    }
+    return { allowed: true };
+  }
+
   setAutoMode(enabled: boolean): void {
     this.isAutoMode = enabled;
   }

@@ -45,6 +45,7 @@ export interface SignhifyConfig {
   provider: {
     agent: ProviderConfig;
     autocomplete?: ProviderConfig;
+    fallbackChain?: FallbackEndpointConfig[];
   };
   modes?: {
     custom?: CustomMode[];
@@ -62,6 +63,11 @@ export interface ProviderConfig {
   baseUrl?: string;
 }
 
+export interface FallbackEndpointConfig extends ProviderConfig {
+  name: string;
+  isLocal?: boolean;
+}
+
 export interface CustomMode {
   name: string;
   prompt: string;
@@ -71,6 +77,7 @@ export interface CustomMode {
 export interface MemoryConfig {
   tokenBudget?: number;
   checkpointThresholdPct?: number;
+  contextLimit?: number;
 }
 
 export interface AutomationConfig {
@@ -80,8 +87,10 @@ export interface AutomationConfig {
 
 export interface McpServerConfig {
   name: string;
-  command: string;
+  command?: string;
   args?: string[];
+  transport?: 'stdio' | 'sse' | 'http';
+  url?: string;
   env?: Record<string, string>;
 }
 

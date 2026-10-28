@@ -3,15 +3,22 @@ import { Message } from './types.js';
 export interface ContextAssemblyResult {
   messages: Message[];
   totalTokens: number;
+  compactedCount?: number;
 }
 
 export class ContextManager {
   private tokenBudget: number;
   private checkpointThresholdPct: number;
+  private contextLimit: number;
 
-  constructor(config?: { tokenBudget?: number; checkpointThresholdPct?: number }) {
+  constructor(config?: {
+    tokenBudget?: number;
+    checkpointThresholdPct?: number;
+    contextLimit?: number;
+  }) {
     this.tokenBudget = config?.tokenBudget ?? 4000;
     this.checkpointThresholdPct = config?.checkpointThresholdPct ?? 80;
+    this.contextLimit = config?.contextLimit ?? 128_000;
   }
 
   assembleContext(params: {
@@ -34,21 +41,47 @@ export class ContextManager {
       systemContent += `\n\n## Task Progress\n${params.taskProgress}`;
     }
 
-    messages.push({ role: 'system', content: systemContent });
+    const systemMsg: Message = { role: 'system', content: systemContent };
+    messages.push(systemMsg);
 
-    let tokenCount = this.estimateTokens(systemContent);
-    for (const msg of params.recentMessages) {
+    const systemTokens = this.estimateTokens(systemContent);
+    const availableBudget = Math.max(0, Math.min(this.contextLimit, this.tokenBudget) - systemTokens);
+
+    // Sliding-window compaction: keep most recent messages first
+    const includedMessages: Message[] = [];
+    let currentTokens = 0;
+    let compactedCount = 0;
+
+    for (let i = params.recentMessages.length - 1; i >= 0; i--) {
+      const msg = params.recentMessages[i];
       const msgTokens = this.estimateTokens(msg.content);
-      if (tokenCount + msgTokens > this.tokenBudget) break;
-      messages.push(msg);
-      tokenCount += msgTokens;
+      if (currentTokens + msgTokens <= availableBudget) {
+        includedMessages.unshift(msg);
+        currentTokens += msgTokens;
+      } else {
+        compactedCount++;
+      }
     }
 
-    return { messages, totalTokens: tokenCount };
+    if (compactedCount > 0) {
+      messages.push({
+        role: 'system',
+        content: `[Context Notice: ${compactedCount} earlier message(s) compacted. State preserved in checkpoints and MEMORY.md.]`,
+      });
+    }
+
+    messages.push(...includedMessages);
+
+    return {
+      messages,
+      totalTokens: systemTokens + currentTokens,
+      compactedCount,
+    };
   }
 
-  shouldCheckpoint(totalTokens: number, contextWindow: number): boolean {
-    const usagePct = (totalTokens / contextWindow) * 100;
+  shouldCheckpoint(totalTokens: number, contextWindow?: number): boolean {
+    const window = contextWindow ?? this.contextLimit;
+    const usagePct = (totalTokens / window) * 100;
     return usagePct >= this.checkpointThresholdPct;
   }
 
@@ -58,5 +91,17 @@ export class ContextManager {
 
   setTokenBudget(budget: number): void {
     this.tokenBudget = budget;
+  }
+
+  getTokenBudget(): number {
+    return this.tokenBudget;
+  }
+
+  setContextLimit(limit: number): void {
+    this.contextLimit = limit;
+  }
+
+  getContextLimit(): number {
+    return this.contextLimit;
   }
 }

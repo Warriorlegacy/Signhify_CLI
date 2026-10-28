@@ -6,7 +6,7 @@ describe('PermissionEngine', () => {
   it('should allow tools in build mode', () => {
     const mm = new ModeManager();
     const pe = new PermissionEngine(mm);
-    expect(pe.canUseTool('file-write').allowed).toBe(true);
+    expect(pe.canUseTool('file-io').allowed).toBe(true);
     expect(pe.canUseTool('shell-exec').allowed).toBe(true);
   });
 
@@ -14,6 +14,10 @@ describe('PermissionEngine', () => {
     const mm = new ModeManager();
     mm.setMode('plan');
     const pe = new PermissionEngine(mm);
+    // Write intent is routed through canPerformFileAction, not the tool allowlist,
+    // so plan mode can still read but not write.
+    expect(pe.canPerformFileAction('file-io', 'write').allowed).toBe(false);
+    expect(pe.canPerformFileAction('file-io', 'read').allowed).toBe(true);
     expect(pe.canWriteFile('/any/path').allowed).toBe(false);
   });
 

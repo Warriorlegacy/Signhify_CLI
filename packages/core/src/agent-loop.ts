@@ -164,6 +164,10 @@ export class AgentLoop {
     return this.taskManager;
   }
 
+  getContextManager(): ContextManager {
+    return this.contextManager;
+  }
+
   async run(initialMessage: string): Promise<AgentLoopResult> {
     this.messages.push({ role: 'user', content: initialMessage, timestamp: Date.now() });
 
@@ -354,6 +358,19 @@ export class AgentLoop {
       return { content: `Permission denied: ${permission.reason}`, isError: true };
     }
 
+    const handler = this.toolHandlers.get(call.name);
+    if (!handler) {
+      return { content: `Unknown tool: ${call.name}`, isError: true };
+    }
+
+    // Check requiresConsent flag from the tool handler
+    if (handler.requiresConsent && !this.autoMode) {
+      const confirmed = await this.promptConfirmation(`Execute ${call.name}`);
+      if (!confirmed) {
+        return { content: `${call.name} denied by user consent`, isError: true };
+      }
+    }
+
     if (call.name === 'shell-exec') {
       const cmd = (call.arguments.command as string) ?? '';
       const shellPerm = this.permissionEngine.canExecuteShell(cmd);
@@ -368,17 +385,15 @@ export class AgentLoop {
       }
     }
 
-    if (call.name === 'file-write') {
-      const filePerm = this.permissionEngine.canWriteFile((call.arguments.path as string) ?? '');
+    if (call.name === 'file-io') {
+      const action = (call.arguments.action as string) ?? '';
+      const filePerm = this.permissionEngine.canPerformFileAction(call.name, action);
       if (!filePerm.allowed) {
         return { content: `Permission denied: ${filePerm.reason}`, isError: true };
       }
-      this.filesWrittenSinceLastVerify.push((call.arguments.path as string) ?? '');
-    }
-
-    const handler = this.toolHandlers.get(call.name);
-    if (!handler) {
-      return { content: `Unknown tool: ${call.name}`, isError: true };
+      if (action === 'write') {
+        this.filesWrittenSinceLastVerify.push((call.arguments.path as string) ?? '');
+      }
     }
 
     try {

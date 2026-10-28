@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { mkdirSync, existsSync } from 'fs';
 import { dirname } from 'path';
+import { buildFtsQuery } from './fts-query.js';
 
 export interface MemoryEntry {
   id?: number;
@@ -10,6 +11,15 @@ export interface MemoryEntry {
   importance: number;
   createdAt?: string;
   lastUsedAt?: string;
+}
+
+export interface TaskRecord {
+  id: string;
+  parentId?: string | null;
+  title: string;
+  status: 'pending' | 'in_progress' | 'blocked' | 'done';
+  progressLog?: string | null;
+  updatedAt?: string;
 }
 
 export class MemoryStore {
@@ -85,6 +95,8 @@ export class MemoryStore {
   }
 
   search(projectId: string, query: string, limit = 10): MemoryEntry[] {
+    const ftsQuery = buildFtsQuery(query);
+    if (!ftsQuery) return [];
     const stmt = this.db.prepare(`
       SELECT m.*, rank
       FROM memory_fts f
@@ -93,7 +105,7 @@ export class MemoryStore {
       ORDER BY rank
       LIMIT ?
     `);
-    return stmt.all(query, projectId, limit) as MemoryEntry[];
+    return stmt.all(ftsQuery, projectId, limit) as MemoryEntry[];
   }
 
   getByCategory(projectId: string, category: string, limit = 50): MemoryEntry[] {
@@ -126,6 +138,59 @@ export class MemoryStore {
       WHERE project_id = ? AND last_used_at < datetime('now', ?) AND importance < 0.3
     `).run(projectId, `-${olderThanDays} days`);
     return result.changes;
+  }
+
+  saveTask(task: {
+    id: string;
+    parentId?: string | null;
+    title: string;
+    status?: 'pending' | 'in_progress' | 'blocked' | 'done';
+    progressLog?: string;
+  }): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO tasks (id, parent_id, title, status, progress_log, updated_at)
+      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(id) DO UPDATE SET
+        parent_id = excluded.parent_id,
+        title = excluded.title,
+        status = excluded.status,
+        progress_log = COALESCE(excluded.progress_log, tasks.progress_log),
+        updated_at = CURRENT_TIMESTAMP
+    `);
+    stmt.run(
+      task.id,
+      task.parentId ?? null,
+      task.title,
+      task.status ?? 'pending',
+      task.progressLog ?? null
+    );
+  }
+
+  getTask(id: string): TaskRecord | null {
+    const stmt = this.db.prepare(
+      'SELECT id, parent_id as parentId, title, status, progress_log as progressLog, updated_at as updatedAt FROM tasks WHERE id = ?'
+    );
+    const row = stmt.get(id);
+    return (row as TaskRecord) ?? null;
+  }
+
+  updateTaskStatus(id: string, status: 'pending' | 'in_progress' | 'blocked' | 'done'): void {
+    this.db.prepare('UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(status, id);
+  }
+
+  appendTaskProgress(id: string, log: string): void {
+    this.db.prepare(`
+      UPDATE tasks
+      SET progress_log = COALESCE(progress_log, '') || ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(log, id);
+  }
+
+  getAllTasks(): TaskRecord[] {
+    const stmt = this.db.prepare(
+      'SELECT id, parent_id as parentId, title, status, progress_log as progressLog, updated_at as updatedAt FROM tasks ORDER BY id ASC'
+    );
+    return stmt.all() as TaskRecord[];
   }
 
   close(): void {

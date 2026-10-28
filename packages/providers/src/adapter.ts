@@ -110,3 +110,28 @@ export function createAISDKAdapter(config: {
     countTokens: (text: string) => Math.ceil(text.length / 4),
   };
 }
+
+export function createMockAdapter(options?: {
+  responses?: string[];
+  vendor?: string;
+}): ModelProviderAdapter {
+  const vendor = options?.vendor ?? 'mock';
+  const responses = options?.responses ? [...options.responses] : undefined;
+  return {
+    id: vendor,
+    vendor,
+    supportsFunctionCalling: true,
+    async *streamChat() {
+      const response = responses?.shift() ?? 'Task completed successfully by mock provider.';
+      yield { type: 'text', content: response };
+      yield {
+        type: 'done',
+        usage: { promptTokens: 10, completionTokens: 10 },
+      };
+    },
+    countTokens(text: string) {
+      return Math.ceil(text.length / 4);
+    },
+  };
+}
+

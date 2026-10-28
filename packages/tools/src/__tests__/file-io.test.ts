@@ -52,4 +52,40 @@ describe('fileIoTool', () => {
     const parsed = JSON.parse(result);
     expect(parsed.error).toContain('Path traversal');
   });
+
+  it('should report created:true and no diff for a new file', async () => {
+    const result = JSON.parse(
+      await fileIoTool.execute(
+        { action: 'write', path: 'new.txt', content: 'line 1\nline 2' },
+        { workingDirectory: tmpDir }
+      )
+    );
+    expect(result.created).toBe(true);
+    expect(result.diff).toBeUndefined();
+  });
+
+  it('should return a diff of what an overwrite replaces', async () => {
+    await fs.writeFile(path.join(tmpDir, 'existing.ts'), 'const a = 1;\nconst b = 2;\n');
+
+    const result = JSON.parse(
+      await fileIoTool.execute(
+        { action: 'write', path: 'existing.ts', content: 'const a = 1;\nconst b = 3;\nconst c = 4;\n' },
+        { workingDirectory: tmpDir }
+      )
+    );
+
+    expect(result.created).toBe(false);
+    expect(result.diff).toContain('--- a/existing.ts');
+    expect(result.diff).toContain('- const b = 2;');
+    expect(result.diff).toContain('+ const b = 3;');
+    expect(result.diff).toContain('+ const c = 4;');
+    // Unchanged first line must not be reported as changed.
+    expect(result.diff).not.toContain('- const a = 1;');
+  });
+
+  it('should still write the file after producing the diff', async () => {
+    await fs.writeFile(path.join(tmpDir, 'f.txt'), 'old');
+    await fileIoTool.execute({ action: 'write', path: 'f.txt', content: 'new' }, { workingDirectory: tmpDir });
+    expect(await fs.readFile(path.join(tmpDir, 'f.txt'), 'utf-8')).toBe('new');
+  });
 });

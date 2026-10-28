@@ -45,4 +45,43 @@ describe('MemoryStore', () => {
     const deleted = store.deleteStale('p1', 0); // 0 days = all stale
     expect(deleted).toBeGreaterThanOrEqual(0);
   });
+
+  it('should not throw on FTS5 operators in the query', () => {
+    store.addEntry({
+      projectId: 'p1',
+      category: 'fact',
+      content: 'Postgres runs on port 5433 behind the proxy',
+      importance: 0.6,
+    });
+
+    // Every one of these used to reach MATCH raw and throw a syntax error.
+    for (const query of [
+      'postgres "port" - 5433',
+      '(postgres)',
+      'port:5433',
+      'postgres*',
+      '^proxy',
+      '{postgres} proxy',
+    ]) {
+      expect(() => store.search('p1', query)).not.toThrow();
+      expect(store.search('p1', query).length).toBeGreaterThan(0);
+    }
+  });
+
+  it('should return no results for a query with no usable tokens', () => {
+    store.addEntry({ projectId: 'p1', category: 'fact', content: 'Anything at all', importance: 0.5 });
+    expect(store.search('p1', '!!! ??? ---')).toEqual([]);
+    expect(store.search('p1', '')).toEqual([]);
+  });
+
+  it('should OR-join tokens so one absent word does not zero the query', () => {
+    store.addEntry({
+      projectId: 'p1',
+      category: 'fact',
+      content: 'Postgres runs on port 5433',
+      importance: 0.6,
+    });
+    // "database" appears nowhere; strict AND would return nothing here.
+    expect(store.search('p1', 'postgres database port').length).toBe(1);
+  });
 });

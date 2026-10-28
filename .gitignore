@@ -42,6 +42,7 @@ logs/
 
 # Reference forks — not part of the product
 /MiMo-Code-main/
+.refs/
 
 # Experiment artifacts
 experiments/

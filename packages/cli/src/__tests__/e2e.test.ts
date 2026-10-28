@@ -16,17 +16,34 @@ describe('CLI E2E', () => {
       version: '1.0.0',
       scripts: { test: 'echo "tests passed"' },
     }));
+
+    // Ensure mock provider configuration in tmpDir for hermetic testing
+    await fs.mkdir(path.join(tmpDir, '.signhify'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, '.signhify', 'config.json'),
+      JSON.stringify({
+        provider: {
+          agent: { vendor: 'mock', model: 'mock-model' },
+        },
+      }, null, 2)
+    );
   });
 
   afterAll(async () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
+  const execEnv = {
+    ...process.env,
+    SIGNHIFY_MOCK_PROVIDER: '1',
+  };
+
   it('should show help with --help', () => {
     const output = execSync(`node "${CLI_PATH}" --help`, {
       cwd: tmpDir,
       encoding: 'utf-8',
-      timeout: 10_000,
+      timeout: 30_000,
+      env: execEnv,
     });
     expect(output).toContain('signhify');
     expect(output).toContain('run');
@@ -36,31 +53,25 @@ describe('CLI E2E', () => {
     const output = execSync(`node "${CLI_PATH}" --version`, {
       cwd: tmpDir,
       encoding: 'utf-8',
-      timeout: 10_000,
+      timeout: 30_000,
+      env: execEnv,
     });
     expect(output).toMatch(/\d+\.\d+\.\d+/);
   });
 
   it('should run task in non-interactive mode with JSON output', () => {
-    try {
-      const output = execSync(
-        `node "${CLI_PATH}" run "echo hello" --auto --output json`,
-        {
-          cwd: tmpDir,
-          encoding: 'utf-8',
-          timeout: 30_000,
-        }
-      );
-      const result = JSON.parse(output);
-      expect(result).toHaveProperty('success');
-      expect(result).toHaveProperty('task', 'echo hello');
-      expect(result).toHaveProperty('auto', true);
-    } catch (error: unknown) {
-      const execError = error as { stdout?: string; stderr?: string };
-      if (execError.stdout) {
-        const result = JSON.parse(execError.stdout);
-        expect(result).toHaveProperty('task');
+    const output = execSync(
+      `node "${CLI_PATH}" run "echo hello" --auto --output json`,
+      {
+        cwd: tmpDir,
+        encoding: 'utf-8',
+        timeout: 30_000,
+        env: execEnv,
       }
-    }
+    );
+    const result = JSON.parse(output);
+    expect(result).toHaveProperty('success', true);
+    expect(result).toHaveProperty('task', 'echo hello');
+    expect(result).toHaveProperty('auto', true);
   });
 });

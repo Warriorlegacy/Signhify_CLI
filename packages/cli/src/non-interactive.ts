@@ -1,6 +1,6 @@
 import { SignhifyConfig, AgentLoop } from '@signhify/core';
-import { createAdapter } from '@signhify/providers';
-import { fileIoTool, shellExecTool, gitTool, searchTool, browserTool, mcpClientTool } from '@signhify/tools';
+import { createAdapter, FallbackRouter, DEFAULT_ZERO_COST_CHAIN, type FallbackEvent } from '@signhify/providers';
+import { fileIoTool, shellExecTool, gitTool, searchTool, browserTool, mcpClientTool, subagentTool } from '@signhify/tools';
 import { MemoryStore, CheckpointWriter, MemoryMdManager } from '@signhify/memory';
 import * as path from 'node:path';
 
@@ -52,7 +52,24 @@ export async function runNonInteractive(
       taskProgress = checkpoint.sections.taskProgress;
     }
 
-    const adapter = await createAdapter(config.provider.agent);
+    let adapter;
+    const fallbackChain =
+      config.provider.fallbackChain && config.provider.fallbackChain.length > 0
+        ? config.provider.fallbackChain
+        : DEFAULT_ZERO_COST_CHAIN;
+
+    if (process.env.SIGNHIFY_MOCK_PROVIDER === "1" || config.provider.agent.vendor === "mock") {
+      adapter = await createAdapter({ vendor: "mock", model: "mock-model" });
+    } else {
+      adapter = new FallbackRouter({
+        endpoints: fallbackChain as import("@signhify/providers").EndpointConfig[],
+        onFallback: (event: FallbackEvent) => {
+          // stdout carries JSON only; diagnostics go to stderr.
+          console.error(`[Fallback] ${event.fromEndpoint} -> ${event.toEndpoint} (${event.reason})`);
+        },
+      });
+    }
+
     const loop = new AgentLoop({
       config,
       workingDirectory: cwd,
@@ -63,10 +80,18 @@ export async function runNonInteractive(
       taskProgress: taskProgress || undefined,
       onCheckpoint: (sessionId, usage) => {
         if (options.output === 'json') {
-          console.log(JSON.stringify({ event: 'checkpoint', sessionId, tokenUsage: usage }), null, 2);
+          console.error(`[checkpoint] ${sessionId} @ ${usage} tokens`);
         }
       },
     });
+
+    // Report MCP connection status (stderr: stdout is reserved for the JSON result).
+    if (config.mcpServers && config.mcpServers.length > 0) {
+      console.error('MCP Servers:');
+      for (const server of config.mcpServers) {
+        console.error(`  - ${server.name}: ${server.command || 'command not set'}`);
+      }
+    }
 
     // Register tools
     loop.registerTool(fileIoTool);
@@ -75,6 +100,7 @@ export async function runNonInteractive(
     loop.registerTool(searchTool);
     loop.registerTool(browserTool);
     loop.registerTool(mcpClientTool);
+    loop.registerTool(subagentTool);
 
     // Set mode
     loop.getModeManager().setMode(options.mode as 'build' | 'plan' | 'debug' | 'compose');
