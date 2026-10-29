@@ -1,4 +1,4 @@
-import { Subagent, SubagentTask, SubagentResult } from './types.js';
+import { Subagent, SubagentTask, SubagentResult, SubagentContext } from './types.js';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
@@ -7,7 +7,7 @@ export class EditorSubagent implements Subagent {
   readonly name = '@Editor';
   readonly description = 'Executes atomic file edits and code modifications with diff preservation';
 
-  async run(task: SubagentTask, cwd: string): Promise<SubagentResult> {
+  async run(task: SubagentTask, cwd: string, _ctx?: SubagentContext): Promise<SubagentResult> {
     const targetFile = task.context?.targetFile as string | undefined;
     const content = task.context?.content as string | undefined;
 

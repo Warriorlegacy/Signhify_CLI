@@ -68,6 +68,8 @@ export interface AgentLoopOptions {
   config: SignhifyConfig;
   workingDirectory: string;
   provider?: ModelProviderAdapter;
+  /** Override the generated session id so checkpoints link to the registry row. */
+  sessionId?: string;
   goal?: Goal;
   autoMode?: boolean;
   memoryContent?: string;
@@ -115,7 +117,7 @@ export class AgentLoop {
   private filesWrittenSinceLastVerify: string[] = [];
 
   constructor(options: AgentLoopOptions) {
-    this.sessionId = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    this.sessionId = options.sessionId ?? `sess_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     this.config = options.config;
     this.workingDirectory = options.workingDirectory;
     this.provider = options.provider;

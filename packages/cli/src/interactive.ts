@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { render, Box, Text, useInput, useApp } from "ink";
 import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
@@ -35,6 +35,7 @@ import {
   browserTool,
   mcpClientTool,
   subagentTool,
+  configureSubagents,
   connectMcpServers,
 } from "@signhify/tools";
 import { createRequire } from "node:module";
@@ -60,6 +61,7 @@ const PALETTE_COMMANDS: PaletteCommand[] = [
   { name: "/sidebar", description: "toggle sidebar (or collapse <id>)" },
   { name: "/goal", description: "set the stop condition" },
   { name: "/mcp", description: "show MCP server status" },
+  { name: "/sessions", description: "list recent sessions" },
   { name: "/memory", description: "show MEMORY.md" },
   { name: "/dream", description: "consolidate session notes" },
   { name: "/distill", description: "distill long-term notes" },
@@ -100,6 +102,11 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
   const memoryStore = new MemoryStore(path.join(cwd, ".signhify", "memory.db"));
   const checkpointWriter = new CheckpointWriter(memoryStore, cwd);
   const dreamDistill = new DreamDistillEngine(memoryStore, memoryMd);
+
+  // Session registry: one row per interactive run; checkpoints link to this id.
+  const [sessionId] = useState(() => memoryStore.createSession(cwd));
+  const messagesRef = useRef<ChatMessage[]>([]);
+  messagesRef.current = messages;
 
   useEffect(() => {
     (async () => {
@@ -172,17 +179,39 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
       setActiveRouterInfo("connecting…");
     }
 
+    // Subagents get whatever adapter this session routes through; the planner
+    // also persists its task tree through the same SQLite store.
+    configureSubagents({
+      adapter,
+      model: config.provider.agent.model,
+      memory: memoryStore,
+    });
+
     const loop = new AgentLoop({
       config,
       workingDirectory: process.cwd(),
       provider: adapter,
+      sessionId,
       autoMode: false,
       goal,
       memoryContent,
       checkpointContent,
       taskProgress,
-      onCheckpoint: (sessionId, usage) => {
+      onCheckpoint: (sid, usage) => {
         setTokenUsage((prev) => ({ ...prev, used: usage }));
+        // Persist the real checkpoint so the /sessions id stays resumable.
+        void checkpointWriter
+          .writeCheckpoint({
+            sessionId: sid,
+            summary: `Auto-checkpoint at ${usage} tokens after ${messagesRef.current.length} message(s).`,
+            tokenUsage: usage,
+            decisions: [],
+            currentDiffs: [],
+            openIssues: [],
+          })
+          .catch(() => {
+            // checkpoint write is best-effort; the loop continues regardless
+          });
       },
       onStream: (chunk) => {
         if (chunk.type === "done" && chunk.usage) {
@@ -300,6 +329,23 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
             setGoal(newGoal);
             setMessages((prev) => [...prev, { role: "system", content: `Goal set: "${arg}"` }]);
           }
+          setInput("");
+          return;
+        }
+        if (cmd === "/sessions") {
+          const rows = memoryStore.listSessions(10);
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "system",
+              content:
+                rows.length === 0
+                  ? "No sessions registered yet."
+                  : `Recent sessions (newest first):\n${rows
+                      .map((s) => `${s.id}  ${s.createdAt ?? ""}${s.id === sessionId ? "  (current)" : ""}`)
+                      .join("\n")}`,
+            },
+          ]);
           setInput("");
           return;
         }

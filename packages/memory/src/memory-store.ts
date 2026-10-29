@@ -82,6 +82,13 @@ export class MemoryStore {
         progress_log TEXT,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
+
+      CREATE TABLE IF NOT EXISTS sessions (
+        id TEXT PRIMARY KEY,
+        cwd TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
     `);
   }
 
@@ -196,4 +203,55 @@ export class MemoryStore {
   close(): void {
     this.db.close();
   }
+
+  /** Register (or re touch) a session; same id resumes the row via upsert. */
+  createSession(cwd?: string, id?: string): string {
+    const sessionId = id ?? `sess_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    this.db.prepare(`
+      INSERT INTO sessions (id, cwd, updated_at)
+      VALUES (?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(id) DO UPDATE SET
+        cwd = COALESCE(excluded.cwd, sessions.cwd),
+        updated_at = CURRENT_TIMESTAMP
+    `).run(sessionId, cwd ?? null);
+    return sessionId;
+  }
+
+  listSessions(limit = 20): SessionRecord[] {
+    return this.db.prepare(
+      'SELECT id, cwd, created_at as createdAt, updated_at as updatedAt FROM sessions ORDER BY created_at DESC, id DESC LIMIT ?',
+    ).all(limit) as SessionRecord[];
+  }
+
+  getSession(id: string): SessionRecord | null {
+    const row = this.db.prepare(
+      'SELECT id, cwd, created_at as createdAt, updated_at as updatedAt FROM sessions WHERE id = ?',
+    ).get(id);
+    return (row as SessionRecord) ?? null;
+  }
+
+  /** Newest checkpoint row for a session — the --resume read path. */
+  getCheckpointBySession(sessionId: string): {
+    summary: string;
+    tokenUsageAtCheckpoint: number | null;
+    createdAt: string | null;
+  } | null {
+    const row = this.db.prepare(`
+      SELECT summary, token_usage_at_checkpoint as tokenUsageAtCheckpoint, created_at as createdAt
+      FROM checkpoints WHERE session_id = ?
+      ORDER BY created_at DESC, id DESC LIMIT 1
+    `).get(sessionId) as {
+      summary: string;
+      tokenUsageAtCheckpoint: number | null;
+      createdAt: string | null;
+    } | undefined;
+    return row ?? null;
+  }
+}
+
+export interface SessionRecord {
+  id: string;
+  cwd?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
 }

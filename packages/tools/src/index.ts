@@ -7,4 +7,4 @@ export { searchTool } from './search.js';
 export { browserTool } from './browser.js';
 export { mcpClientTool, listMcpResources, listMcpPrompts, connectMcpServers, getMcpStatuses } from './mcp-client.js';
 export type { McpStatus, McpServerStatus } from './mcp-client.js';
-export { subagentTool } from './subagent.js';
+export { subagentTool, configureSubagents } from './subagent.js';

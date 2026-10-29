@@ -1,12 +1,20 @@
 import { ToolHandler } from './tool-handler.js';
 import { SubagentOrchestrator } from '@signhify/agents';
-import type { SubagentRole } from '@signhify/agents';
+import type { SubagentRole, SubagentContext } from '@signhify/agents';
 
+// Wired once by the CLI after the adapter and memory store exist; empty
+// runtime keeps today's template-only behaviour for anything that never calls it.
+let runtime: SubagentContext = {};
 let orchestrator: SubagentOrchestrator | null = null;
+
+export function configureSubagents(ctx: SubagentContext): void {
+  runtime = ctx;
+  orchestrator = null; // rebuild the cache so the new ctx is picked up
+}
 
 function getOrchestrator(workingDirectory: string): SubagentOrchestrator {
   if (!orchestrator) {
-    orchestrator = new SubagentOrchestrator(workingDirectory);
+    orchestrator = new SubagentOrchestrator(workingDirectory, runtime);
   }
   return orchestrator;
 }

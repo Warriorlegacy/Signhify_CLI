@@ -52,6 +52,36 @@ describe('SubagentOrchestrator', () => {
     expect(res.output).toContain('T1');
   });
 
+  it('planner tasks: >=1 child persisted with parentId "T1" (T3.2)', async () => {
+    process.env.SIGNHIFY_MOCK_PROVIDER = '1'; // force the template path — hermetic
+    const { MemoryStore } = await import('@signhify/memory');
+    const store = new MemoryStore(path.join(tmpDir, 'memory.db'));
+    const orchestratorWithMemory = new SubagentOrchestrator(tmpDir, {
+      memory: store,
+    });
+
+    try {
+      const res = await orchestratorWithMemory.dispatch({
+        id: 'task-plan-1',
+        role: 'planner',
+        objective: 'ship the feature',
+      });
+
+      expect(res.success).toBe(true);
+      const tasks = res.metadata?.tasks as Array<{ id: string; parentId?: string }>;
+      expect(tasks.length).toBeGreaterThanOrEqual(2);
+      expect(tasks.some(t => t.parentId === 'T1')).toBe(true);
+
+      // And the same rows landed in the SQLite tasks table.
+      const child = store.getTask('T1.1');
+      expect(child?.parentId).toBe('T1');
+      expect(store.getTask('T1')).not.toBeNull();
+    } finally {
+      delete process.env.SIGNHIFY_MOCK_PROVIDER;
+      store.close();
+    }
+  });
+
   it('should run a pipeline across multiple subagents', async () => {
     const pipeline = await orchestrator.runPipeline([
       { id: '1', role: 'file-picker', objective: 'find payment files' },

@@ -1,4 +1,4 @@
-import { Subagent, SubagentTask, SubagentResult } from './types.js';
+import { Subagent, SubagentTask, SubagentResult, SubagentContext } from './types.js';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -9,7 +9,7 @@ export class ReviewerSubagent implements Subagent {
   readonly name = '@Reviewer';
   readonly description = 'Executes verification suites, inspects diffs, and validates goal stop conditions';
 
-  async run(task: SubagentTask, cwd: string): Promise<SubagentResult> {
+  async run(task: SubagentTask, cwd: string, _ctx?: SubagentContext): Promise<SubagentResult> {
     const testCommand = (task.context?.testCommand as string) || 'npm test -- --run';
 
     try {

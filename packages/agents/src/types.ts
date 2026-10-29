@@ -20,6 +20,23 @@ export interface SubagentResult {
   metadata?: Record<string, unknown>;
 }
 
+/** Persistence seam for planner task trees; satisfied by MemoryStore.saveTask. */
+export interface TaskPersister {
+  saveTask(task: {
+    id: string;
+    parentId?: string | null;
+    title: string;
+    status?: 'pending' | 'in_progress' | 'blocked' | 'done';
+  }): void;
+}
+
+/** Runtime handed to every subagent by the orchestrator. */
+export interface SubagentContext {
+  adapter?: import('@signhify/providers').ModelProviderAdapter;
+  model?: string;
+  memory?: TaskPersister;
+}
+
 export interface SubagentProgressEvent {
   type: 'status' | 'log' | 'diff' | 'error' | 'done';
   message: string;
@@ -30,6 +47,6 @@ export interface Subagent {
   readonly role: SubagentRole;
   readonly name: string;
   readonly description: string;
-  run(task: SubagentTask, cwd: string): Promise<SubagentResult>;
+  run(task: SubagentTask, cwd: string, ctx?: SubagentContext): Promise<SubagentResult>;
 }
 

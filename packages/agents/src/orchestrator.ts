@@ -1,4 +1,4 @@
-import { Subagent, SubagentRole, SubagentTask, SubagentResult } from './types.js';
+import { Subagent, SubagentRole, SubagentTask, SubagentResult, SubagentContext } from './types.js';
 import { FilePickerSubagent } from './file-picker.js';
 import { PlannerSubagent } from './planner.js';
 import { EditorSubagent } from './editor.js';
@@ -8,9 +8,12 @@ import { BrowserUseSubagent } from './browser-use.js';
 export class SubagentOrchestrator {
   private registry = new Map<SubagentRole, Subagent>();
   private workingDirectory: string;
+  private ctx: SubagentContext;
 
-  constructor(workingDirectory: string) {
+  /** Wire an adapter/model and (optionally) the task-tree store at construction. */
+  constructor(workingDirectory: string, options?: SubagentContext) {
     this.workingDirectory = workingDirectory;
+    this.ctx = options ?? {};
     this.registerSubagent(new FilePickerSubagent());
     this.registerSubagent(new PlannerSubagent());
     this.registerSubagent(new EditorSubagent());
@@ -44,7 +47,7 @@ export class SubagentOrchestrator {
       };
     }
 
-    return agent.run(task, this.workingDirectory);
+    return agent.run(task, this.workingDirectory, this.ctx);
   }
 
   async runPipeline(tasks: SubagentTask[]): Promise<SubagentResult[]> {

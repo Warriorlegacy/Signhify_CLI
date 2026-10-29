@@ -1,6 +1,6 @@
 import { SignhifyConfig, AgentLoop } from '@signhify/core';
 import { createAdapter, FallbackRouter, DEFAULT_ZERO_COST_CHAIN, type FallbackEvent } from '@signhify/providers';
-import { fileIoTool, shellExecTool, gitTool, searchTool, browserTool, mcpClientTool, subagentTool } from '@signhify/tools';
+import { fileIoTool, shellExecTool, gitTool, searchTool, browserTool, mcpClientTool, subagentTool, configureSubagents } from '@signhify/tools';
 import { MemoryStore, CheckpointWriter, MemoryMdManager } from '@signhify/memory';
 import { resolveApiKeyRef } from './config.js';
 import * as path from 'node:path';
@@ -9,6 +9,7 @@ interface RunOptions {
   auto: boolean;
   output: 'json' | 'text';
   mode: string;
+  resume?: string;
 }
 
 interface RunResult {
@@ -16,6 +17,7 @@ interface RunResult {
   task: string;
   mode: string;
   auto: boolean;
+  sessionId?: string;
   toolCalls: number;
   messages: number;
   goalMet?: boolean;
@@ -31,26 +33,41 @@ export async function runNonInteractive(
 ): Promise<void> {
   const startTime = Date.now();
   const cwd = process.cwd();
+  let usageTokens = 0;
 
   try {
     const memoryMd = new MemoryMdManager(cwd);
     const memoryStore = new MemoryStore(path.join(cwd, '.signhify', 'memory.db'));
     const checkpointWriter = new CheckpointWriter(memoryStore, cwd);
 
-    const [memContent, checkpoint] = await Promise.all([
-      memoryMd.readMemoryMd(),
-      checkpointWriter.readLatestCheckpoint(),
-    ]);
+    // Session registry (T3.3): every run registers a row; --resume re-touches
+    // the same row so checkpoints keep linking to one id.
+    const sessionId = memoryStore.createSession(cwd, options.resume);
+
+    const memContent = await memoryMd.readMemoryMd();
 
     let checkpointContent = '';
     let taskProgress = '';
-    if (checkpoint) {
-      const parts: string[] = [];
-      if (checkpoint.summary) parts.push(`## Previous Session Summary\n${checkpoint.summary}`);
-      if (checkpoint.sections.decisions.length) parts.push(`## Decisions\n${checkpoint.sections.decisions.map(d => `- ${d}`).join('\n')}`);
-      if (checkpoint.sections.openIssues.length) parts.push(`## Open Issues\n${checkpoint.sections.openIssues.map(i => `- ${i}`).join('\n')}`);
-      checkpointContent = parts.join('\n\n');
-      taskProgress = checkpoint.sections.taskProgress;
+    if (options.resume) {
+      // Scoped resume: only this session's checkpoint — the latest file may
+      // belong to a different session.
+      const resumed = memoryStore.getCheckpointBySession(options.resume);
+      if (resumed) {
+        checkpointContent = `## Previous Session Summary\n${resumed.summary}`;
+        console.error(`[resume] loaded checkpoint for ${options.resume} (${resumed.createdAt} @ ${resumed.tokenUsageAtCheckpoint} tokens)`);
+      } else {
+        console.error(`[resume] session ${options.resume} has no checkpoint; starting clean`);
+      }
+    } else {
+      const checkpoint = await checkpointWriter.readLatestCheckpoint();
+      if (checkpoint) {
+        const parts: string[] = [];
+        if (checkpoint.summary) parts.push(`## Previous Session Summary\n${checkpoint.summary}`);
+        if (checkpoint.sections.decisions.length) parts.push(`## Decisions\n${checkpoint.sections.decisions.map(d => `- ${d}`).join('\n')}`);
+        if (checkpoint.sections.openIssues.length) parts.push(`## Open Issues\n${checkpoint.sections.openIssues.map(i => `- ${i}`).join('\n')}`);
+        checkpointContent = parts.join('\n\n');
+        taskProgress = checkpoint.sections.taskProgress;
+      }
     }
 
     let adapter;
@@ -78,14 +95,24 @@ export async function runNonInteractive(
       });
     }
 
+    // Subagents get whatever adapter this run routes through; the planner
+    // also persists its task tree through the same SQLite store.
+    configureSubagents({ adapter, model: config.provider.agent.model, memory: memoryStore });
+
     const loop = new AgentLoop({
       config,
       workingDirectory: cwd,
       provider: adapter,
+      sessionId,
       autoMode: options.auto,
       memoryContent: memContent || undefined,
       checkpointContent: checkpointContent || undefined,
       taskProgress: taskProgress || undefined,
+      onStream: (chunk) => {
+        if (chunk.type === 'done' && chunk.usage) {
+          usageTokens = (chunk.usage.promptTokens ?? 0) + (chunk.usage.completionTokens ?? 0);
+        }
+      },
       onCheckpoint: (sessionId, usage) => {
         if (options.output === 'json') {
           console.error(`[checkpoint] ${sessionId} @ ${usage} tokens`);
@@ -116,12 +143,30 @@ export async function runNonInteractive(
     const result = await loop.run(task);
     const elapsed = Date.now() - startTime;
 
+    // End-of-run checkpoint so the session registry actually has something to
+    // resume from (the checkpoints table was write-only until now).
+    try {
+      await checkpointWriter.writeCheckpoint({
+        sessionId,
+        summary: result.success
+          ? `Completed "${task}" with ${result.toolCalls.length} tool call(s).`
+          : `Failed "${task}": ${result.error ?? 'unknown'}`,
+        tokenUsage: usageTokens,
+        decisions: [],
+        currentDiffs: [],
+        openIssues: result.error ? [result.error.slice(0, 200)] : [],
+      });
+    } catch (err) {
+      console.error(`[checkpoint] write failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
     const goalNotMet = result.goalMet === false && result.error?.includes('Max iterations');
     const runResult: RunResult = {
       success: result.success,
       task,
       mode: options.mode,
       auto: options.auto,
+      sessionId,
       toolCalls: result.toolCalls.length,
       messages: result.messages.length,
       goalMet: result.goalMet,

@@ -1,4 +1,4 @@
-import { Subagent, SubagentTask, SubagentResult } from './types.js';
+import { Subagent, SubagentTask, SubagentResult, SubagentContext } from './types.js';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
@@ -7,7 +7,7 @@ export class FilePickerSubagent implements Subagent {
   readonly name = '@FilePicker';
   readonly description = 'Explores repository layout and discovers minimal relevant files for a coding task';
 
-  async run(task: SubagentTask, cwd: string): Promise<SubagentResult> {
+  async run(task: SubagentTask, cwd: string, _ctx?: SubagentContext): Promise<SubagentResult> {
     const matchedFiles: string[] = [];
     const query = (task.objective || '').toLowerCase();
     const keywords = query.split(/\s+/).filter(k => k.length > 2);

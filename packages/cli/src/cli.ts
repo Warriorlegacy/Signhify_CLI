@@ -17,13 +17,15 @@ export async function runCli(): Promise<void> {
         .positional('task', { type: 'string', demandOption: true, describe: 'Task to execute' })
         .option('auto', { type: 'boolean', default: false, alias: 'yes', describe: 'Suppress all confirmation prompts' })
         .option('output', { type: 'string', choices: ['json', 'text'] as const, default: 'text', describe: 'Output format' })
-        .option('mode', { type: 'string', default: 'build', describe: 'Agent mode' });
+        .option('mode', { type: 'string', default: 'build', describe: 'Agent mode' })
+        .option('resume', { type: 'string', describe: 'Resume a registered session id: loads its newest checkpoint as context' });
     }, async (argv) => {
       const config = await loadConfig();
       await runNonInteractive(argv.task as string, config, {
         auto: argv.auto as boolean,
         output: argv.output as 'json' | 'text',
         mode: argv.mode as string,
+        resume: argv.resume as string | undefined,
       });
     })
     .command('wizard', 'Run first-run setup wizard', () => {}, async () => {
