@@ -528,6 +528,39 @@ export async function loadConfig(
   return config;
 }
 
+function validateNoPlaceholderApiKey(config: SignhifyConfig): void {
+  const isMock =
+    process.env.SIGNHIFY_MOCK_PROVIDER === "1" ||
+    process.env.SIGNHIFY_MOCK_PROVIDER === "true" ||
+    config.provider?.agent?.vendor === "mock" ||
+    config.provider?.agent?.vendor === "test";
+  if (isMock) return;
+
+  const check = (vendor: string | undefined, ref: string | undefined) => {
+    if (!ref || !vendor) return;
+    if (ref.startsWith("env:") || ref.startsWith("keytar:")) return;
+    const val = validateProviderApiKey(vendor, ref);
+    if (!val.valid && val.error?.includes("placeholder")) {
+      throw new Error(
+        `Placeholder API key detected for provider "${vendor}" ("${maskApiKey(ref)}"). ` +
+        `Please set your actual API key in .signhify/config.json, .env, or run \`signhify configure\`.`
+      );
+    }
+  };
+
+  if (config.provider?.agent) {
+    check(config.provider.agent.vendor, config.provider.agent.apiKeyRef);
+  }
+  if (config.provider?.autocomplete) {
+    check(config.provider.autocomplete.vendor, config.provider.autocomplete.apiKeyRef);
+  }
+  if (config.provider?.fallbackChain) {
+    for (const fb of config.provider.fallbackChain) {
+      check(fb.vendor, fb.apiKeyRef);
+    }
+  }
+}
+
 async function loadConfigFile(configPath: string, projectDir?: string): Promise<SignhifyConfig | undefined> {
   let content: string;
   try {
@@ -538,6 +571,7 @@ async function loadConfigFile(configPath: string, projectDir?: string): Promise<
   }
 
   const parsed = migrateLegacyApiKey(JSON.parse(content) as SignhifyConfig);
+  validateNoPlaceholderApiKey(parsed);
   await validateConfigBeforeSecretStorage(parsed);
   const secured = await storeKeytarRefs(parsed);
   await signhifyConfigSchema(secured);
@@ -549,6 +583,7 @@ async function loadConfigFile(configPath: string, projectDir?: string): Promise<
 
 export async function saveConfig(config: SignhifyConfig, projectDir?: string): Promise<void> {
   migrateLegacyApiKey(config);
+  validateNoPlaceholderApiKey(config);
   await validateConfigBeforeSecretStorage(config);
   const toSave = await storeKeytarRefs(config);
   await signhifyConfigSchema(toSave);

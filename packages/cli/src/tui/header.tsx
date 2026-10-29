@@ -40,9 +40,9 @@ export function getGitBranch(cwd: string = process.cwd()): string | null {
  */
 export function getLeafDirectory(cwd: string = process.cwd()): string {
   try {
-    const resolved = path.resolve(cwd);
-    const leaf = path.basename(resolved);
-    return leaf || resolved || "workspace";
+    const normalized = cwd.replace(/\\/g, "/").replace(/\/+$/, "");
+    const leaf = path.posix.basename(normalized);
+    return leaf || "workspace";
   } catch {
     return "workspace";
   }
