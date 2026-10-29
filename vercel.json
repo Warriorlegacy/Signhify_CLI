@@ -1,11 +1,19 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
-  "buildCommand": null,
   "outputDirectory": "site",
-  "rewrites": [
-    { "source": "/install", "destination": "/install.md" }
-  ],
+  "buildCommand": null,
   "cleanUrls": true,
-  "trailingSlash": false
+  "trailingSlash": false,
+  "rewrites": [
+    { "source": "/install", "destination": "/install.md" },
+    { "source": "/docs/:name", "destination": "/docs/:name.md" },
+    { "source": "/docs/:subdir/:name", "destination": "/docs/:subdir/:name.md" }
+  ],
+  "headers": [
+    {
+      "source": "/assets/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+    }
+  ]
 }
