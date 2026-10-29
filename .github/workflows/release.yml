@@ -47,11 +47,18 @@ jobs:
           npm publish -w packages/memory --access public
           npm publish -w packages/cli --access public
 
+      - name: Generate release checksums
+        run: |
+          npm run build
+          sha256sum packages/*/dist/*.js packages/*/dist/*.d.ts 2>/dev/null | sort > checksums.sha256 || true
+          cat checksums.sha256
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           name: Signhify ${{ github.ref_name }}
+          files: checksums.sha256
 
   publish-vscode:
     runs-on: ubuntu-latest

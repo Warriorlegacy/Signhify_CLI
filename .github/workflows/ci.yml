@@ -8,9 +8,10 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
+        os: [ubuntu-latest, windows-latest]
         node-version: [20, 22]
 
     steps:
@@ -36,6 +37,9 @@ jobs:
 
       - name: Run all tests
         run: npm run test
+
+      - name: Verify install script syntax
+        run: bash -n install.sh
 
   e2e:
     runs-on: ubuntu-latest

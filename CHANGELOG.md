@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Reverse-engineering report (`docs/REVERSE_ENGINEERING_REPORT.md`) covering OpenCode, Freebuff, Kilo Code, MiMo Code with site-claim vs repo-proven evidence
+- Bash token-efficient output pipeline (ANSI/BEL strip, progress-line fold, secret redaction, long-line elision, head+tail cap)
+- Compaction `thresholdPercent` knob (Kilo-style) with legacy window-first default
+- `/usage`, `/models`, `/history` palette commands
+- Checkpoint FTS index + `MemoryStore.searchCheckpoints` (`/history` read path)
+
+### Changed
+
+- `CheckpointWriter` now writes through `MemoryStore.saveCheckpoint` (single write path)
+- `shell-exec` output condensed instead of raw 50 KB slice
+
+### Fixed
+
+- Lint: justified `no-control-regex` disable on the ANSI matcher
+
+## [0.2.0] - 2026-10-29
+
+### Added
+
+- TUI parity: section-based sidebar (context / MCP / todos), real MCP status, true footer status line, command palette
+- `/context-limit` command with config persistence; single config schema source (`signhify.config.schema.json`)
+- Agent quality: diff-before-write, LLM-backed subagents (planner/orchestrator/reviewer/editor), session registry with `/sessions` and `--resume`, progressive context pruning (T3.4)
+- Website: honest comparison table, terminal replay component, docs routes, deploy plan
+- VS Code extension (chat panel + inline completions)
+
 ## [0.1.1] - 2026-07-04
 
 ### Fixed
