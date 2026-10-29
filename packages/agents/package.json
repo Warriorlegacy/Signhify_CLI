@@ -1,0 +1,39 @@
+{
+  "name": "@signhify/agents",
+  "version": "0.2.0",
+  "description": "Specialized subagents for Signhify CLI (@FilePicker, @Planner, @Editor, @Reviewer, @BrowserUse)",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsc -b --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "node -e \"const {rmSync,existsSync}=require('fs');['dist','*.tsbuildinfo'].forEach(p=>{if(existsSync(p))rmSync(p,{recursive:true,force:true})})\""
+  },
+  "dependencies": {
+    "@signhify/core": "^0.2.0",
+    "@signhify/providers": "^0.2.0",
+    "@signhify/tools": "^0.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
+
