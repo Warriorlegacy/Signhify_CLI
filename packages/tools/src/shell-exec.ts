@@ -1,10 +1,12 @@
 import { ToolHandler } from './tool-handler.js';
-import { exec as execCb } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { AbortError } from './errors.js';
+import { killProcessTree } from './process-utils.js';
 
-const execAsync = promisify(execCb);
+export { AbortError };
+export { killProcessTree };
 
 function isWithinDirectory(filePath: string, dir: string): boolean {
   const resolved = path.resolve(dir, filePath);
@@ -32,6 +34,7 @@ const SECRET_REDACTIONS: Array<{ re: RegExp }> = [
 ];
 
 const MAX_LINE_CHARS = 2_000;
+const MAX_BUFFER = 10 * 1024 * 1024; // 10MB
 
 /** Exported for tests. */
 export function condenseShellOutput(output: string, maxChars = 50_000): string {
@@ -95,27 +98,146 @@ export const shellExecTool: ToolHandler = {
       return JSON.stringify({ exitCode: 1, stdout: '', stderr: `Working directory does not exist: ${cwd}` });
     }
 
-    try {
-      const { stdout, stderr } = await execAsync(command, {
-        cwd,
-        timeout: timeoutMs,
-        maxBuffer: 10 * 1024 * 1024,
-        env: { ...process.env, FORCE_COLOR: '0' },
+    if (context.signal?.aborted) {
+      throw new AbortError('Shell command execution was aborted');
+    }
+
+    return new Promise<string>((resolve, reject) => {
+      let child: import('node:child_process').ChildProcess;
+      try {
+        child = spawn(command, {
+          cwd,
+          shell: true,
+          detached: process.platform !== 'win32',
+          env: { ...process.env, FORCE_COLOR: '0' },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+      } catch (err) {
+        if (context.signal?.aborted) {
+          reject(new AbortError('Shell command execution was aborted'));
+        } else {
+          reject(err);
+        }
+        return;
+      }
+
+      let stdout = '';
+      let stderr = '';
+      let timedOut = false;
+      let maxBufferExceeded = false;
+      let timeoutTimer: NodeJS.Timeout | undefined;
+
+      const terminateChild = () => {
+        killProcessTree(child);
+      };
+
+      const cleanup = () => {
+        if (timeoutTimer) {
+          clearTimeout(timeoutTimer);
+          timeoutTimer = undefined;
+        }
+        if (context.signal) {
+          context.signal.removeEventListener('abort', onAbort);
+        }
+      };
+
+      const onAbort = () => {
+        terminateChild();
+        cleanup();
+        reject(new AbortError('Shell command execution was aborted'));
+      };
+
+      if (context.signal) {
+        if (context.signal.aborted) {
+          terminateChild();
+          cleanup();
+          reject(new AbortError('Shell command execution was aborted'));
+          return;
+        }
+        context.signal.addEventListener('abort', onAbort, { once: true });
+      }
+
+      if (timeoutMs > 0 && Number.isFinite(timeoutMs)) {
+        timeoutTimer = setTimeout(() => {
+          timedOut = true;
+          terminateChild();
+        }, timeoutMs);
+        timeoutTimer.unref();
+      }
+
+      child.stdout?.on('data', (chunk: Buffer) => {
+        if (stdout.length + chunk.length > MAX_BUFFER) {
+          maxBufferExceeded = true;
+          terminateChild();
+          return;
+        }
+        stdout += chunk.toString('utf-8');
       });
 
-      return JSON.stringify({
-        exitCode: 0,
-        stdout: condenseShellOutput(stdout),
-        stderr: condenseShellOutput(stderr),
+      child.stderr?.on('data', (chunk: Buffer) => {
+        if (stderr.length + chunk.length > MAX_BUFFER) {
+          maxBufferExceeded = true;
+          terminateChild();
+          return;
+        }
+        stderr += chunk.toString('utf-8');
       });
-    } catch (error: unknown) {
-      const execError = error as { code?: number; stdout?: string; stderr?: string; message?: string };
-      return JSON.stringify({
-        exitCode: execError.code ?? 1,
-        stdout: condenseShellOutput(execError.stdout ?? ''),
-        stderr: condenseShellOutput(execError.stderr ?? execError.message ?? ''),
+
+      child.on('error', (err) => {
+        cleanup();
+        if (context.signal?.aborted) {
+          reject(new AbortError('Shell command execution was aborted'));
+          return;
+        }
+        resolve(
+          JSON.stringify({
+            exitCode: 1,
+            stdout: condenseShellOutput(stdout),
+            stderr: condenseShellOutput(err.message),
+          })
+        );
       });
-    }
+
+      child.on('close', (code, signalName) => {
+        cleanup();
+
+        if (context.signal?.aborted) {
+          reject(new AbortError('Shell command execution was aborted'));
+          return;
+        }
+
+        if (timedOut) {
+          resolve(
+            JSON.stringify({
+              exitCode: 124,
+              stdout: condenseShellOutput(stdout),
+              stderr: condenseShellOutput(`Command timed out after ${timeoutMs}ms`),
+            })
+          );
+          return;
+        }
+
+        if (maxBufferExceeded) {
+          resolve(
+            JSON.stringify({
+              exitCode: 1,
+              stdout: condenseShellOutput(stdout),
+              stderr: `Command stdout/stderr exceeded maxBuffer of ${MAX_BUFFER} bytes`,
+            })
+          );
+          return;
+        }
+
+        const exitCode = typeof code === 'number' ? code : signalName ? 128 : 0;
+        resolve(
+          JSON.stringify({
+            exitCode,
+            stdout: condenseShellOutput(stdout),
+            stderr: condenseShellOutput(stderr),
+          })
+        );
+      });
+    });
   },
 };
 

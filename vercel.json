@@ -2,7 +2,9 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
   "outputDirectory": "site",
-  "buildCommand": null,
+  "framework": null,
+  "installCommand": "echo 'skipping install'",
+  "buildCommand": "node scripts/copy-docs.mjs",
   "cleanUrls": true,
   "trailingSlash": false,
   "rewrites": [

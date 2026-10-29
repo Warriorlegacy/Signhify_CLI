@@ -1,9 +1,13 @@
 {
-  "name": "@signhify/vscode-ext",
+  "name": "signhify",
   "displayName": "Signhify — AI Engineering Agent",
   "description": "Your AI engineering partner — in the terminal and in the IDE",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publisher": "signhify",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Warriorlegacy/Signhify_CLI.git"
+  },
   "license": "MIT",
   "private": true,
   "engines": {
@@ -23,6 +27,22 @@
       {
         "command": "signhify.newTask",
         "title": "Signhify: New Task"
+      },
+      {
+        "command": "signhify.setApiKey",
+        "title": "Signhify: Set API Key"
+      },
+      {
+        "command": "signhify.clearApiKey",
+        "title": "Signhify: Clear API Key"
+      },
+      {
+        "command": "signhify.openSettings",
+        "title": "Signhify: Open Settings"
+      },
+      {
+        "command": "signhify.setAutocompleteApiKey",
+        "title": "Signhify: Set Autocomplete API Key"
       },
       {
         "command": "signhify.switchMode",
@@ -74,11 +94,6 @@
           "default": "gpt-4",
           "description": "Model name"
         },
-        "signhify.provider.apiKey": {
-          "type": "string",
-          "default": "",
-          "description": "API key for the selected provider"
-        },
         "signhify.provider.baseUrl": {
           "type": "string",
           "default": "",
@@ -100,11 +115,6 @@
           "default": "gpt-4",
           "description": "Model name for inline autocomplete"
         },
-        "signhify.provider.autocomplete.apiKey": {
-          "type": "string",
-          "default": "",
-          "description": "API key for inline autocomplete provider"
-        },
         "signhify.provider.autocomplete.baseUrl": {
           "type": "string",
           "default": "",
@@ -114,8 +124,10 @@
     }
   },
   "scripts": {
+    "typecheck": "tsc --noEmit",
     "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --external:playwright --external:playwright-core --format=cjs --platform=node",
     "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --external:playwright --external:playwright-core --format=cjs --platform=node --watch",
+    "package": "vsce package --no-dependencies",
     "test": "vitest run",
     "clean": "node -e \"const {rmSync,existsSync}=require('fs');['dist','*.tsbuildinfo'].forEach(p=>{if(existsSync(p))rmSync(p,{recursive:true,force:true})})\""
   },
@@ -128,9 +140,9 @@
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.2.1",
     "esbuild": "^0.20.0",
     "typescript": "^5.5.0",
     "vitest": "^2.0.0"
   }
 }
-

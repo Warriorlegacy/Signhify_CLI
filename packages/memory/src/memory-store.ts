@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { mkdirSync, existsSync } from 'fs';
 import { dirname } from 'path';
-import { buildFtsQuery } from './fts-query.js';
+import { sanitizeFts5Query } from './fts-query.js';
 
 export interface MemoryEntry {
   id?: number;
@@ -85,6 +85,8 @@ export class MemoryStore {
 
       CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY,
+        title TEXT,
+        parent_id TEXT,
         cwd TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -113,6 +115,15 @@ export class MemoryStore {
     if (ftsCount === 0 && cpCount > 0) {
       this.db.exec("INSERT INTO checkpoints_fts(checkpoints_fts) VALUES('rebuild')");
     }
+
+    // Migration: ensure title and parent_id columns exist on sessions table.
+    const sessionCols = (this.db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>).map((c) => c.name);
+    if (!sessionCols.includes('title')) {
+      this.db.exec('ALTER TABLE sessions ADD COLUMN title TEXT');
+    }
+    if (!sessionCols.includes('parent_id')) {
+      this.db.exec('ALTER TABLE sessions ADD COLUMN parent_id TEXT');
+    }
   }
 
   addEntry(entry: MemoryEntry): number {
@@ -125,7 +136,7 @@ export class MemoryStore {
   }
 
   search(projectId: string, query: string, limit = 10): MemoryEntry[] {
-    const ftsQuery = buildFtsQuery(query);
+    const ftsQuery = sanitizeFts5Query(query);
     if (!ftsQuery) return [];
     const stmt = this.db.prepare(`
       SELECT m.*, rank
@@ -237,35 +248,127 @@ export class MemoryStore {
     return Number(result.lastInsertRowid);
   }
 
-  /** Register (or re touch) a session; same id resumes the row via upsert. */
-  createSession(cwd?: string, id?: string): string {
+  /** Register (or re-touch) a session; same id resumes the row via upsert. */
+  createSession(cwd?: string, id?: string, title?: string): string {
     const sessionId = id ?? `sess_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     this.db.prepare(`
-      INSERT INTO sessions (id, cwd, updated_at)
-      VALUES (?, ?, CURRENT_TIMESTAMP)
+      INSERT INTO sessions (id, cwd, title, updated_at)
+      VALUES (?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(id) DO UPDATE SET
         cwd = COALESCE(excluded.cwd, sessions.cwd),
+        title = COALESCE(excluded.title, sessions.title),
         updated_at = CURRENT_TIMESTAMP
-    `).run(sessionId, cwd ?? null);
+    `).run(sessionId, cwd ?? null, title ?? null);
     return sessionId;
   }
 
-  listSessions(limit = 20): SessionRecord[] {
-    return this.db.prepare(
-      'SELECT id, cwd, created_at as createdAt, updated_at as updatedAt FROM sessions ORDER BY created_at DESC, id DESC LIMIT ?',
-    ).all(limit) as SessionRecord[];
+  /**
+   * Fork an existing session under a new branch ID, duplicating its checkpoints and memory records.
+   */
+  forkSession(sessionId: string, newSessionId?: string, forkTitle?: string): Session {
+    const source = this.getSession(sessionId);
+    const hasCheckpoints = (this.db.prepare('SELECT count(*) as count FROM checkpoints WHERE session_id = ?').get(sessionId) as { count: number }).count > 0;
+    const hasEntries = (this.db.prepare('SELECT count(*) as count FROM memory_entries WHERE project_id = ?').get(sessionId) as { count: number }).count > 0;
+
+    if (!source && !hasCheckpoints && !hasEntries) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+
+    if (newSessionId && this.getSession(newSessionId)) {
+      throw new Error(`Session already exists: ${newSessionId}`);
+    }
+
+    const forkId = newSessionId ?? `sess_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const title = forkTitle !== undefined ? forkTitle : (source?.title ? `Fork of ${source.title}` : `Fork of ${sessionId}`);
+    const cwd = source?.cwd ?? null;
+
+    const forkTx = this.db.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO sessions (id, cwd, title, parent_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT(id) DO UPDATE SET
+          cwd = excluded.cwd,
+          title = excluded.title,
+          parent_id = excluded.parent_id,
+          updated_at = CURRENT_TIMESTAMP
+      `).run(forkId, cwd, title, sessionId);
+
+      const checkpoints = this.db.prepare(`
+        SELECT summary, token_usage_at_checkpoint as tokenUsage
+        FROM checkpoints
+        WHERE session_id = ?
+        ORDER BY id ASC
+      `).all(sessionId) as Array<{ summary: string; tokenUsage: number | null }>;
+
+      for (const cp of checkpoints) {
+        this.saveCheckpoint(forkId, cp.summary, cp.tokenUsage ?? 0);
+      }
+
+      const entries = this.db.prepare(`
+        SELECT category, content, importance
+        FROM memory_entries
+        WHERE project_id = ?
+        ORDER BY id ASC
+      `).all(sessionId) as Array<{
+        category: 'fact' | 'decision' | 'convention' | 'rule';
+        content: string;
+        importance: number;
+      }>;
+
+      for (const entry of entries) {
+        this.addEntry({
+          projectId: forkId,
+          category: entry.category,
+          content: entry.content,
+          importance: entry.importance,
+        });
+      }
+    });
+
+    forkTx();
+
+    const forkedSession = this.getSession(forkId);
+    if (!forkedSession) {
+      throw new Error(`Failed to create forked session ${forkId}`);
+    }
+    return forkedSession;
   }
 
-  getSession(id: string): SessionRecord | null {
-    const row = this.db.prepare(
-      'SELECT id, cwd, created_at as createdAt, updated_at as updatedAt FROM sessions WHERE id = ?',
-    ).get(id);
-    return (row as SessionRecord) ?? null;
+  listSessions(limit = 20): Session[] {
+    return this.db.prepare(`
+      SELECT
+        s.id,
+        s.title,
+        s.parent_id as parentId,
+        s.cwd,
+        s.created_at as createdAt,
+        s.updated_at as updatedAt,
+        (SELECT COUNT(*) FROM checkpoints c WHERE c.session_id = s.id) as checkpointCount
+      FROM sessions s
+      ORDER BY s.created_at DESC, s.id DESC
+      LIMIT ?
+    `).all(limit) as Session[];
+  }
+
+  getSession(id: string): Session | null {
+    const row = this.db.prepare(`
+      SELECT
+        s.id,
+        s.title,
+        s.parent_id as parentId,
+        s.cwd,
+        s.created_at as createdAt,
+        s.updated_at as updatedAt,
+        (SELECT COUNT(*) FROM checkpoints c WHERE c.session_id = s.id) as checkpointCount
+      FROM sessions s
+      WHERE s.id = ?
+    `).get(id);
+    return (row as Session) ?? null;
   }
 
   /** FTS retrieval over checkpoint summaries — the /history read path. */
   searchCheckpoints(query: string, limit = 10, sessionId?: string): CheckpointHit[] {
-    const ftsQuery = buildFtsQuery(query);
+    const ftsQuery = sanitizeFts5Query(query);
     if (!ftsQuery) return [];
     const stmt = this.db.prepare(`
       SELECT c.id,
@@ -299,14 +402,38 @@ export class MemoryStore {
     } | undefined;
     return row ?? null;
   }
+  getAllCheckpointsBySession(sessionId: string): Array<{
+    id: number;
+    sessionId: string;
+    summary: string;
+    tokenUsageAtCheckpoint: number | null;
+    createdAt: string | null;
+  }> {
+    return this.db.prepare(`
+      SELECT id, session_id as sessionId, summary, token_usage_at_checkpoint as tokenUsageAtCheckpoint, created_at as createdAt
+      FROM checkpoints WHERE session_id = ?
+      ORDER BY id ASC
+    `).all(sessionId) as Array<{
+      id: number;
+      sessionId: string;
+      summary: string;
+      tokenUsageAtCheckpoint: number | null;
+      createdAt: string | null;
+    }>;
+  }
 }
 
-export interface SessionRecord {
+export interface Session {
   id: string;
   cwd?: string | null;
+  title?: string | null;
+  parentId?: string | null;
+  checkpointCount?: number;
   createdAt?: string | null;
   updatedAt?: string | null;
 }
+
+export type SessionRecord = Session;
 
 export interface CheckpointHit {
   id: number;

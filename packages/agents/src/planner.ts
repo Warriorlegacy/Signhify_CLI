@@ -57,6 +57,9 @@ export class PlannerSubagent implements Subagent {
   readonly description = 'Formulates hierarchical task roadmaps and assigns specialized subagents';
 
   async run(task: SubagentTask, _cwd: string, ctx?: SubagentContext): Promise<SubagentResult> {
+    if (ctx?.signal?.aborted) {
+      return { success: false, output: '', error: 'Subagent cancelled by user' };
+    }
     const objective = task.objective;
     let steps: PlanStep[];
 
@@ -77,7 +80,8 @@ export class PlannerSubagent implements Subagent {
         } else {
           steps = this.templateSteps(objective);
         }
-      } catch {
+      } catch (error) {
+        if (ctx?.signal?.aborted) throw error;
         steps = this.templateSteps(objective);
       }
     } else {

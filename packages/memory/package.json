@@ -1,6 +1,6 @@
 {
   "name": "@signhify/memory",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Signhify persistent memory — SQLite FTS5 store, checkpoint writer, dream/distill",
   "license": "MIT",
   "type": "module",
@@ -36,4 +36,3 @@
     "access": "public"
   }
 }
-

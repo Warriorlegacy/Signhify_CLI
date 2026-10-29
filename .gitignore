@@ -49,3 +49,9 @@ experiments/
 scratch/
 
 .vercel
+.hermes/
+graphify-out/
+.codebase-memory/
+Signhify_CLI_Final_Reports/
+Signhify_CLI_Final_Reports.zip
+*.vsix

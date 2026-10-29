@@ -36,6 +36,7 @@ export class ContextManager {
 
   assembleContext(params: {
     systemPrompt: string;
+    projectInstructions?: string;
     memoryContent?: string;
     checkpointContent?: string;
     taskProgress?: string;
@@ -44,6 +45,9 @@ export class ContextManager {
     const messages: Message[] = [];
 
     let systemContent = params.systemPrompt;
+    if (params.projectInstructions) {
+      systemContent += `\n\n${params.projectInstructions}`;
+    }
     if (params.memoryContent) {
       systemContent += `\n\n## Project Memory\n${params.memoryContent}`;
     }

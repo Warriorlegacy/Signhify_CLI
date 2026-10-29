@@ -207,6 +207,8 @@ export class FallbackRouter implements ModelProviderAdapter {
         errorMsg = err instanceof Error ? err.message : String(err);
       }
 
+      if (params.abortSignal?.aborted) return;
+
       // Only an endpoint that actually streamed something counts as up.
       if (responded) {
         this.onEndpointSuccess?.(endpoint.name);

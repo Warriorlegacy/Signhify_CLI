@@ -7,6 +7,9 @@ export class BrowserUseSubagent implements Subagent {
   readonly description = 'Executes end-to-end browser operations and visual verifications';
 
   async run(task: SubagentTask, _cwd: string, ctx?: SubagentContext): Promise<SubagentResult> {
+    if (ctx?.signal?.aborted) {
+      return { success: false, output: '', error: 'Subagent cancelled by user' };
+    }
     const url = task.context?.url as string | undefined;
 
     if (shouldUseAdapter(ctx)) {
@@ -23,7 +26,8 @@ export class BrowserUseSubagent implements Subagent {
           output: `@BrowserUse plan for "${url ?? 'about:blank'}":\n${plan}`,
           metadata: { targetUrl: url },
         };
-      } catch {
+      } catch (error) {
+        if (ctx.signal?.aborted) throw error;
         // fall through to the template readiness notice
       }
     }

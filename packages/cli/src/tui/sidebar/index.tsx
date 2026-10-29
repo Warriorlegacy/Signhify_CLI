@@ -15,6 +15,7 @@ export interface McpStatusLike {
 export interface SidebarState {
   tokenUsage: { used: number; limit: number };
   usagePct: number;
+  tokensPerSecond: number | null;
   activeRouterInfo: string;
   mcpStatuses: McpStatusLike[];
   taskTree: TaskNode[];

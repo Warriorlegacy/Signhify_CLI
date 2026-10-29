@@ -1,6 +1,6 @@
 {
   "name": "signhify",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "An open-source AI engineering partner — in the terminal and in the IDE",
   "license": "MIT",
@@ -21,6 +21,7 @@
     "build:web": "npm run build -w packages/web",
     "build:docs": "node scripts/copy-docs.mjs",
     "build:vscode": "npm run build -w packages/vscode-ext",
+    "package:vscode": "npm run package -w packages/vscode-ext",
     "test": "npm run test --workspaces --if-present",
     "test:core": "npm run test -w packages/core",
     "test:providers": "npm run test -w packages/providers",
@@ -29,7 +30,7 @@
     "test:memory": "npm run test -w packages/memory",
     "test:cli": "npm run test -w packages/cli",
     "lint": "eslint packages/*/src/**/*.ts",
-    "typecheck": "npm run typecheck -w packages/core -w packages/providers -w packages/tools -w packages/memory -w packages/web -w packages/cli",
+    "typecheck": "npm run typecheck -w packages/core -w packages/providers -w packages/tools -w packages/memory -w packages/agents -w packages/web -w packages/cli -w packages/vscode-ext",
     "clean": "npm run clean --workspaces --if-present",
     "clean:all": "node -e \"const {rmSync,existsSync}=require('fs');['dist','*.tsbuildinfo','.turbo','coverage'].forEach(p=>{if(existsSync(p))rmSync(p,{recursive:true,force:true})})\"",
     "prepare": "husky"
@@ -43,4 +44,3 @@
     "vitest": "^2.0.0"
   }
 }
-

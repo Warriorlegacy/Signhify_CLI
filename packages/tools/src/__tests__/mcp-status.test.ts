@@ -17,7 +17,8 @@ describe('MCP connection status', () => {
   it('reports a server whose command does not exist as failed with a reason', async () => {
     const statuses = await connectMcpServers(
       [{ name: 'missing-binary', command: 'signhify-definitely-not-a-real-binary-xyz', args: [] }],
-      process.cwd()
+      process.cwd(),
+      async () => true
     );
     const entry = statuses.find((s) => s.name === 'missing-binary');
     expect(entry).toBeDefined();

@@ -41,19 +41,25 @@ describe("config: single schema source (T2.3) + /context-limit persistence (T2.2
     }
   });
 
-  it("legacy plaintext apiKey loads via migration to apiKeyRef", async () => {
+  it("migrates legacy plaintext apiKey securely or fails closed without keychain support", async () => {
     const dir = writeProjectConfig(
       JSON.stringify({ provider: { agent: { ...validAgent, apiKey: "sk-legacy" } } }),
     );
-    const cfg = await loadConfig(dir);
-    expect(cfg.provider.agent.apiKeyRef).toBe("sk-legacy");
+    let cfg: Awaited<ReturnType<typeof loadConfig>>;
+    try {
+      cfg = await loadConfig(dir);
+    } catch (error) {
+      expect(String(error)).toMatch(/keychain support is unavailable|could not store the API key/i);
+      return;
+    }
+    expect(cfg.provider.agent.apiKeyRef).toMatch(/^keytar:signhify:/);
     expect(cfg.provider.agent.apiKey).toBe("sk-legacy");
 
-    // And a round-trip persists apiKeyRef (never apiKey) — schema forbids apiKey.
+    // And a round-trip persists only the OS keychain reference.
     const outDir = join(sandbox, "out");
     await saveConfig(cfg, outDir);
     const persisted = readFileSync(join(outDir, ".signhify", "config.json"), "utf-8");
-    expect(persisted).toContain("apiKeyRef");
+    expect(persisted).toContain('"apiKeyRef": "keytar:signhify:');
     expect(persisted).not.toContain('"apiKey"');
   });
 

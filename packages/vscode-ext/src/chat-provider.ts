@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
-import type { AgentLoop, SignhifyConfig } from '@signhify/core';
+import { AgentLoop, loadProjectInstructions, type SignhifyConfig } from '@signhify/core';
 import { createAdapter } from '@signhify/providers';
 import { fileIoTool, shellExecTool, gitTool, searchTool } from '@signhify/tools';
+import { getCredential, migrateLegacyApiKeys } from './secret-storage.js';
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -11,10 +12,9 @@ interface ChatMessage {
 }
 
 interface FileEdit {
-  id: string;
   filePath: string;
   content: string;
-  accepted?: boolean;
+  created: boolean;
 }
 
 export class SignhifyChatProvider implements vscode.WebviewViewProvider {
@@ -22,6 +22,7 @@ export class SignhifyChatProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
   private messages: ChatMessage[] = [];
   private currentMode = 'build';
+  private activeRun?: AbortController;
   private context: vscode.ExtensionContext;
 
   constructor(context: vscode.ExtensionContext) {
@@ -41,34 +42,28 @@ export class SignhifyChatProvider implements vscode.WebviewViewProvider {
       if (message.type === 'sendMessage') {
         await this.handleMessage(message.text);
       }
+      if (message.type === 'cancel') {
+        this.activeRun?.abort();
+      }
       if (message.type === 'setMode') {
         this.currentMode = message.mode;
-      }
-      if (message.type === 'acceptEdit' || message.type === 'rejectEdit') {
-        const editId = message.editId as string;
-        for (const msg of this.messages) {
-          if (msg.fileEdits) {
-            const edit = msg.fileEdits.find((e) => e.id === editId);
-            if (edit) {
-              edit.accepted = message.type === 'acceptEdit';
-              break;
-            }
-          }
-        }
-        this.postMessages();
       }
     });
   }
 
   async handleMessage(text: string): Promise<void> {
+    if (this.activeRun) return;
+    const run = new AbortController();
+    this.activeRun = run;
     this.messages.push({ role: 'user', content: text, timestamp: Date.now() });
     this.postMessages();
 
     let taskSummary: string | undefined;
     try {
-      const config = this.getConfig();
+      const config = await this.getConfig();
       const workspaceFolder =
         vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+      const projectInstructions = await loadProjectInstructions(workspaceFolder, config.memory?.tokenBudget);
 
       const adapter = await createAdapter(config.provider.agent);
       const loop = new AgentLoop({
@@ -76,6 +71,12 @@ export class SignhifyChatProvider implements vscode.WebviewViewProvider {
         workingDirectory: workspaceFolder,
         provider: adapter,
         autoMode: false,
+        projectInstructions,
+        confirm: async (message) => (await vscode.window.showWarningMessage(
+          message,
+          { modal: true },
+          'Apply',
+        )) === 'Apply',
       });
 
       loop.registerTool(fileIoTool);
@@ -84,7 +85,16 @@ export class SignhifyChatProvider implements vscode.WebviewViewProvider {
       loop.registerTool(searchTool);
       loop.getModeManager().setMode(this.currentMode as 'build' | 'plan' | 'debug' | 'compose');
 
-      const result = await loop.run(text);
+      const result = await loop.run(text, run.signal);
+      if (this.activeRun !== run) return;
+      if (result.cancelled) {
+        this.messages.push({
+          role: 'assistant',
+          content: 'Run cancelled. Completed changes are not rolled back.',
+          timestamp: Date.now(),
+        });
+        return;
+      }
       const lastAssistant = result.messages
         .filter((m) => m.role === 'assistant')
         .pop();
@@ -100,14 +110,20 @@ export class SignhifyChatProvider implements vscode.WebviewViewProvider {
 
       taskSummary = lastAssistant?.content?.slice(0, 80) ?? 'No response generated.';
     } catch (error) {
+      if (this.activeRun !== run) return;
       this.messages.push({
         role: 'assistant',
-        content: `Error: ${error instanceof Error ? error.message : String(error)}`,
+        content: run.signal.aborted
+          ? 'Run cancelled. Completed changes are not rolled back.'
+          : `Error: ${error instanceof Error ? error.message : String(error)}`,
         timestamp: Date.now(),
       });
+    } finally {
+      if (this.activeRun === run) {
+        this.activeRun = undefined;
+        this.postMessages();
+      }
     }
-
-    this.postMessages();
 
     if (taskSummary) {
       vscode.window.showInformationMessage(`Task complete: ${taskSummary}`);
@@ -115,23 +131,33 @@ export class SignhifyChatProvider implements vscode.WebviewViewProvider {
   }
 
   newTask(): void {
+    this.activeRun?.abort();
+    this.activeRun = undefined;
     this.messages = [];
     this.postMessages();
   }
 
   private extractFileEdits(
-    toolCalls: Array<{ call: { name: string; arguments: Record<string, unknown> }; result: string }>
+    toolCalls: Array<{ call: { name: string; arguments: Record<string, unknown> }; result: string; isError?: boolean }>
   ): FileEdit[] {
     const edits: FileEdit[] = [];
     for (const tc of toolCalls) {
       if (tc.call.name === 'file-io' && tc.call.arguments.action === 'write') {
+        if (tc.isError) continue;
+        let result: { success?: boolean; created?: boolean };
+        try {
+          result = JSON.parse(tc.result) as { success?: boolean; created?: boolean };
+          if (result.success !== true) continue;
+        } catch {
+          continue;
+        }
         const filePath = tc.call.arguments.path as string;
         const content = tc.call.arguments.content as string;
-        if (filePath && content) {
+        if (filePath && typeof content === 'string') {
           edits.push({
-            id: `edit_${Date.now()}_${edits.length}`,
             filePath,
             content,
+            created: result.created === true,
           });
         }
       }
@@ -149,17 +175,20 @@ export class SignhifyChatProvider implements vscode.WebviewViewProvider {
       type: 'messages',
       messages: this.messages,
       mode: this.currentMode,
+      running: Boolean(this.activeRun),
     });
   }
 
-  private getConfig(): SignhifyConfig {
+  private async getConfig(): Promise<SignhifyConfig> {
+    await migrateLegacyApiKeys(this.context);
     const config = vscode.workspace.getConfiguration('signhify');
+    const apiKey = await getCredential(this.context, 'provider.apiKey');
     return {
       provider: {
         agent: {
           vendor: config.get<'anthropic' | 'google' | 'openai' | 'openai-compatible'>('provider.vendor', 'openai'),
           model: config.get<string>('provider.model', 'gpt-4'),
-          apiKey: config.get<string>('provider.apiKey', ''),
+          apiKey: apiKey ?? '',
           baseUrl: config.get<string>('provider.baseUrl', ''),
         },
       },
@@ -276,6 +305,20 @@ export class SignhifyChatProvider implements vscode.WebviewViewProvider {
       opacity: 0.5;
       cursor: not-allowed;
     }
+    #cancel-btn {
+      padding: 8px 12px;
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-family: var(--vscode-font-family);
+      font-size: var(--vscode-font-size);
+      white-space: nowrap;
+    }
+    #cancel-btn[hidden] {
+      display: none;
+    }
     .loading {
       color: var(--vscode-descriptionForeground);
       font-style: italic;
@@ -372,16 +415,19 @@ export class SignhifyChatProvider implements vscode.WebviewViewProvider {
   <div class="input-row">
     <input id="input" type="text" placeholder="Describe a task..." />
     <button id="send-btn">Send</button>
+    <button id="cancel-btn" type="button" hidden>Cancel</button>
   </div>
   <script>
     const vscode = acquireVsCodeApi();
     const input = document.getElementById('input');
     const sendBtn = document.getElementById('send-btn');
+    const cancelBtn = document.getElementById('cancel-btn');
     const messagesEl = document.getElementById('messages');
     const modeIndicator = document.getElementById('mode-indicator');
     let awaitingResponse = false;
 
     sendBtn.addEventListener('click', send);
+    cancelBtn.addEventListener('click', () => vscode.postMessage({ type: 'cancel' }));
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -395,6 +441,7 @@ export class SignhifyChatProvider implements vscode.WebviewViewProvider {
       if (!text) return;
       awaitingResponse = true;
       sendBtn.disabled = true;
+      cancelBtn.hidden = false;
       vscode.postMessage({ type: 'sendMessage', text });
       input.value = '';
     }
@@ -412,15 +459,7 @@ export class SignhifyChatProvider implements vscode.WebviewViewProvider {
             var diffHtml = '';
             if (m.fileEdits && m.fileEdits.length > 0) {
               diffHtml = m.fileEdits.map(function(edit) {
-                var statusBadge = '';
-                var btnDisabled = '';
-                if (edit.accepted === true) {
-                  statusBadge = '<span class="edit-status edit-accepted">Applied</span>';
-                  btnDisabled = ' disabled';
-                } else if (edit.accepted === false) {
-                  statusBadge = '<span class="edit-status edit-rejected">Rejected</span>';
-                  btnDisabled = ' disabled';
-                }
+                var statusBadge = '<span class="edit-status edit-accepted">Applied after approval</span>';
                 var contentLines = edit.content.split('\\n');
                 var numberedLines = contentLines.map(function(line, i) {
                   return '<span style="color:var(--vscode-editorLineNumberForeground);user-select:none;display:inline-block;width:3ch;text-align:right;margin-right:1ch">' + (i + 1) + '</span>' +
@@ -429,14 +468,10 @@ export class SignhifyChatProvider implements vscode.WebviewViewProvider {
                 return '<div class="diff-container">' +
                   '<div class="diff-header">' +
                     '<span class="file-path">' + escapeHtml(edit.filePath) + '</span>' +
-                    '<span class="badge">NEW</span>' +
+                  '<span class="badge">' + (edit.created ? 'NEW' : 'UPDATED') + '</span>' +
                     statusBadge +
                   '</div>' +
                   '<div class="diff-body"><pre>' + numberedLines + '</pre></div>' +
-                  '<div class="diff-actions">' +
-                    '<button class="accept-btn" data-edit-id="' + edit.id + '"' + btnDisabled + '>Accept</button>' +
-                    '<button class="reject-btn" data-edit-id="' + edit.id + '"' + btnDisabled + '>Reject</button>' +
-                  '</div>' +
                 '</div>';
               }).join('');
             }
@@ -449,9 +484,10 @@ export class SignhifyChatProvider implements vscode.WebviewViewProvider {
         }
         modeIndicator.textContent = 'Mode: ' + msg.mode;
         messagesEl.scrollTop = messagesEl.scrollHeight;
-        awaitingResponse = false;
-        sendBtn.disabled = false;
-        input.focus();
+        awaitingResponse = msg.running === true;
+        sendBtn.disabled = awaitingResponse;
+        cancelBtn.hidden = !awaitingResponse;
+        if (!awaitingResponse) input.focus();
       }
 
       if (msg.type === 'modeChanged') {
@@ -465,13 +501,6 @@ export class SignhifyChatProvider implements vscode.WebviewViewProvider {
       return div.innerHTML;
     }
 
-    messagesEl.addEventListener('click', function(e) {
-      var target = e.target;
-      if (!target.dataset || !target.dataset.editId) return;
-      var editId = target.dataset.editId;
-      var type = target.classList.contains('accept-btn') ? 'acceptEdit' : 'rejectEdit';
-      vscode.postMessage({ type: type, editId: editId });
-    });
   </script>
 </body>
 </html>`;

@@ -15,13 +15,16 @@ Signhify is an AI coding agent that executes code on your machine. **This carrie
 - **Permission engine** — every tool call routes through per-mode allow/deny rules
 - **Shell allowlist/denylist** — restrict which commands run in `--auto` mode
 - **File-write restrictions** — plan mode prevents file modifications
-- **OS keychain storage** — API keys stored in OS keychain via `keytar`, never on disk
+- **Secret storage** — CLI literal keys are moved to the OS keychain via `keytar`; config writes fail if keychain storage fails. Environment-variable references are supported. VS Code keys use `SecretStorage`.
+- **File writes** — writes are previewed before interactive approval; canonical path checks reject traversal and symlink escapes.
+- **Subagent side effects** — @Editor writes through the reviewed `file-io` tool, and @Reviewer runs commands through `shell-exec`; Plan mode and `--auto` rules therefore apply to nested agent actions too.
+- **MCP process execution** — configured MCP servers do not start automatically; connect, invoke, and disconnect require approval and are disabled in `--auto` mode. Subprocesses inherit Signhify's process environment, which is disclosed in the connection preview.
 
 ### What we do NOT control
 
 - **LLM provider behavior** — we send prompts to external APIs (OpenAI, Anthropic, Google, etc.). Their data handling is governed by their own policies.
-- **MCP server behavior** — third-party MCP servers run as subprocesses with their own capabilities
-- **Malicious config files** — `signhify.config.json` can configure arbitrary MCP servers and shell commands. Review config files from untrusted sources before using them.
+- **MCP server behavior** — third-party MCP servers run as subprocesses with their own capabilities and inherited process environment
+- **Malicious config files** — `.signhify/config.json` can configure arbitrary MCP servers and shell commands. Review config files from untrusted sources before using them.
 - **Malicious prompts** — a carefully crafted prompt could trick the model into harmful actions. Use in sandboxed environments for untrusted code.
 
 ### You should

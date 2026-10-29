@@ -1,11 +1,11 @@
 {
   "name": "@signhify/cli",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Terminal frontend for the Signhify AI coding agent",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "signhify": "./dist/index.js"
+    "signhify": "bin/signhify.js"
   },
   "license": "MIT",
   "scripts": {
@@ -37,4 +37,3 @@
     "access": "public"
   }
 }
-

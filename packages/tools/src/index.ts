@@ -1,10 +1,12 @@
 export type { ToolHandler } from './tool-handler.js';
 export type { McpResource, McpPrompt } from './mcp-client.js';
-export { fileIoTool } from './file-io.js';
+export { fileIoTool, summariseDiff, generateDiffPreview, previewWrite, type DiffSummary } from './file-io.js';
 export { shellExecTool } from './shell-exec.js';
 export { gitTool } from './git.js';
 export { searchTool } from './search.js';
 export { browserTool } from './browser.js';
-export { mcpClientTool, listMcpResources, listMcpPrompts, connectMcpServers, getMcpStatuses } from './mcp-client.js';
+export { AbortError } from './errors.js';
+export { killProcessTree, isProcessRunning } from './process-utils.js';
+export { mcpClientTool, listMcpResources, listMcpPrompts, connectMcpServers, configureMcpServers, disconnectAllMcpServers, getMcpStatuses } from './mcp-client.js';
 export type { McpStatus, McpServerStatus } from './mcp-client.js';
 export { subagentTool, configureSubagents } from './subagent.js';

@@ -10,15 +10,12 @@ describe('MCP Client Presets', () => {
     const parsed = JSON.parse(res);
     expect(parsed).toHaveProperty('presets');
     const names = parsed.presets.map((p: { preset: string }) => p.preset);
-    expect(names).toContain('rea');
-    expect(names).toContain('cloudflare');
-    expect(names).toContain('supabase');
-    expect(names).toContain('openseo');
+    expect(names).toEqual(['rea']);
   });
 
-  it('should have rea preset configured with official package', () => {
+  it('pins the REA package and uses its MCP entry point', () => {
     expect(BUILT_IN_MCP_PRESETS.rea.command).toBe('npx');
-    expect(BUILT_IN_MCP_PRESETS.rea.args).toContain('rea-agents@latest');
+    expect(BUILT_IN_MCP_PRESETS.rea.args).toEqual(['-y', 'rea-agents@6.8.0', 'mcp']);
   });
 });
 

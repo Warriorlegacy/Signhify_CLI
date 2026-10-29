@@ -1,6 +1,6 @@
 {
   "name": "@signhify/agents",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Specialized subagents for Signhify CLI (@FilePicker, @Planner, @Editor, @Reviewer, @BrowserUse)",
   "license": "MIT",
   "type": "module",
@@ -24,8 +24,7 @@
   },
   "dependencies": {
     "@signhify/core": "^0.2.0",
-    "@signhify/providers": "^0.2.0",
-    "@signhify/tools": "^0.2.0"
+    "@signhify/providers": "^0.2.0"
   },
   "devDependencies": {
     "@signhify/memory": "^0.2.0",
@@ -37,5 +36,3 @@
     "access": "public"
   }
 }
-
-

@@ -1,43 +1,53 @@
-import { SignhifyConfig, AgentLoop } from '@signhify/core';
-import { createAdapter, FallbackRouter, DEFAULT_ZERO_COST_CHAIN, type FallbackEvent } from '@signhify/providers';
-import { fileIoTool, shellExecTool, gitTool, searchTool, browserTool, mcpClientTool, subagentTool, configureSubagents } from '@signhify/tools';
+import { AgentLoop, loadProjectInstructions, type SignhifyConfig, type ToolCall } from '@signhify/core';
+import { createAdapter, FallbackRouter, DEFAULT_ZERO_COST_CHAIN, type FallbackEvent, type StreamChunk } from '@signhify/providers';
+import { fileIoTool, shellExecTool, gitTool, searchTool, browserTool, mcpClientTool, subagentTool, configureSubagents, configureMcpServers, disconnectAllMcpServers } from '@signhify/tools';
 import { MemoryStore, CheckpointWriter, MemoryMdManager } from '@signhify/memory';
 import { resolveApiKeyRef } from './config.js';
 import * as path from 'node:path';
 
-interface RunOptions {
+export interface RunOptions {
   auto: boolean;
-  output: 'json' | 'text';
+  output: 'json' | 'text' | 'quiet';
   mode: string;
   resume?: string;
+  signal?: AbortSignal;
+  confirm?: (message: string) => Promise<boolean>;
+  onStream?: (chunk: StreamChunk) => void;
+  onToolCall?: (call: ToolCall) => void;
+  onToolResult?: (toolCallId: string, result: string, isError?: boolean) => void;
 }
 
-interface RunResult {
+export interface RunResult {
   success: boolean;
+  cancelled?: boolean;
   task: string;
   mode: string;
   auto: boolean;
   sessionId?: string;
   toolCalls: number;
   messages: number;
+  answer?: string;
   goalMet?: boolean;
   goalVerdict?: import('@signhify/core').GoalVerdict;
   error?: string;
   exitCode: number;
+  elapsedMs: number;
 }
 
 export async function runNonInteractive(
   task: string,
   config: SignhifyConfig,
   options: RunOptions
-): Promise<void> {
+): Promise<RunResult> {
   const startTime = Date.now();
   const cwd = process.cwd();
   let usageTokens = 0;
+  let memoryStore: MemoryStore | undefined;
 
   try {
+    const projectInstructions = await loadProjectInstructions(cwd, config.memory?.tokenBudget);
     const memoryMd = new MemoryMdManager(cwd);
-    const memoryStore = new MemoryStore(path.join(cwd, '.signhify', 'memory.db'));
+    memoryStore = new MemoryStore(path.join(cwd, '.signhify', 'memory.db'));
     const checkpointWriter = new CheckpointWriter(memoryStore, cwd);
 
     // Session registry (T3.3): every run registers a row; --resume re-touches
@@ -97,7 +107,13 @@ export async function runNonInteractive(
 
     // Subagents get whatever adapter this run routes through; the planner
     // also persists its task tree through the same SQLite store.
-    configureSubagents({ adapter, model: config.provider.agent.model, memory: memoryStore });
+    configureSubagents({
+      adapter,
+      model: config.provider.agent.model,
+      memory: memoryStore,
+      onProgress: (event) => console.error(`[subagent] ${event.message}`),
+    });
+    configureMcpServers(config.mcpServers ?? []);
 
     const loop = new AgentLoop({
       config,
@@ -105,6 +121,7 @@ export async function runNonInteractive(
       provider: adapter,
       sessionId,
       autoMode: options.auto,
+      projectInstructions,
       memoryContent: memContent || undefined,
       checkpointContent: checkpointContent || undefined,
       taskProgress: taskProgress || undefined,
@@ -112,7 +129,11 @@ export async function runNonInteractive(
         if (chunk.type === 'done' && chunk.usage) {
           usageTokens = (chunk.usage.promptTokens ?? 0) + (chunk.usage.completionTokens ?? 0);
         }
+        options.onStream?.(chunk);
       },
+      onToolCall: options.onToolCall,
+      onToolResult: options.onToolResult,
+      confirm: options.confirm,
       onCheckpoint: (sessionId, usage) => {
         if (options.output === 'json') {
           console.error(`[checkpoint] ${sessionId} @ ${usage} tokens`);
@@ -124,7 +145,7 @@ export async function runNonInteractive(
     if (config.mcpServers && config.mcpServers.length > 0) {
       console.error('MCP Servers:');
       for (const server of config.mcpServers) {
-        console.error(`  - ${server.name}: ${server.command || 'command not set'}`);
+        console.error(`  - ${server.name}: configured; starts only after explicit approval`);
       }
     }
 
@@ -140,7 +161,7 @@ export async function runNonInteractive(
     // Set mode
     loop.getModeManager().setMode(options.mode as 'build' | 'plan' | 'debug' | 'compose');
 
-    const result = await loop.run(task);
+    const result = await loop.run(task, options.signal);
     const elapsed = Date.now() - startTime;
 
     // End-of-run checkpoint so the session registry actually has something to
@@ -163,21 +184,24 @@ export async function runNonInteractive(
     const goalNotMet = result.goalMet === false && result.error?.includes('Max iterations');
     const runResult: RunResult = {
       success: result.success,
+      cancelled: result.cancelled,
       task,
       mode: options.mode,
       auto: options.auto,
       sessionId,
       toolCalls: result.toolCalls.length,
       messages: result.messages.length,
+      answer: [...result.messages].reverse().find((message) => message.role === 'assistant')?.content,
       goalMet: result.goalMet,
       goalVerdict: result.goalVerdict,
       error: result.error,
       exitCode: goalNotMet ? 2 : result.success ? 0 : 1,
+      elapsedMs: elapsed,
     };
 
     if (options.output === 'json') {
-      console.log(JSON.stringify({ ...runResult, elapsedMs: elapsed }, null, 2));
-    } else {
+      console.log(JSON.stringify(runResult, null, 2));
+    } else if (options.output === 'text') {
       if (result.success) {
         console.log(`Task completed successfully in ${(elapsed / 1000).toFixed(1)}s`);
         console.log(`Tool calls: ${result.toolCalls.length}`);
@@ -186,10 +210,11 @@ export async function runNonInteractive(
       }
     }
 
-    process.exit(runResult.exitCode);
+    return runResult;
   } catch (error) {
     const runResult: RunResult = {
       success: false,
+      cancelled: options.signal?.aborted,
       task,
       mode: options.mode,
       auto: options.auto,
@@ -197,6 +222,7 @@ export async function runNonInteractive(
       messages: 0,
       error: error instanceof Error ? error.message : String(error),
       exitCode: 1,
+      elapsedMs: Date.now() - startTime,
     };
 
     if (options.output === 'json') {
@@ -205,6 +231,17 @@ export async function runNonInteractive(
       console.error(`Fatal error: ${runResult.error}`);
     }
 
-    process.exit(1);
+    return runResult;
+  } finally {
+    try {
+      await disconnectAllMcpServers();
+    } catch (error) {
+      console.error(`[MCP] disconnect failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    try {
+      memoryStore?.close();
+    } catch (error) {
+      console.error(`[memory] close failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 }

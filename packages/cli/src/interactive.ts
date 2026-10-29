@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect, useRef } from "react";
 import { render, Box, Text, useInput, useApp } from "ink";
 import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
-import { SignhifyConfig, AgentLoop, Goal, TaskNode } from "@signhify/core";
+import { SignhifyConfig, AgentLoop, Goal, TaskNode, loadProjectInstructions } from "@signhify/core";
 import { saveConfig, resolveApiKeyRef } from "./config.js";
 import {
   buildSidebarSections,
@@ -36,8 +36,12 @@ import {
   mcpClientTool,
   subagentTool,
   configureSubagents,
-  connectMcpServers,
+  configureMcpServers,
+  disconnectAllMcpServers,
+  getMcpStatuses,
 } from "@signhify/tools";
+import { calculateTokenSpeed, formatSessionSummary } from "./tokens.js";
+import { Footer } from "./tui/footer.js";
 import { createRequire } from "node:module";
 import * as path from "node:path";
 
@@ -65,13 +69,22 @@ const PALETTE_COMMANDS: PaletteCommand[] = [
   { name: "/goal", description: "set the stop condition" },
   { name: "/mcp", description: "show MCP server status" },
   { name: "/sessions", description: "list recent sessions" },
+  { name: "/fork", description: "branch current session with checkpoints" },
   { name: "/memory", description: "show MEMORY.md" },
   { name: "/dream", description: "consolidate session notes" },
   { name: "/distill", description: "distill long-term notes" },
   { name: "/exit", description: "quit Signhify" },
 ];
 
-function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
+function ChatApp({
+  config: initialConfig,
+  projectInstructions,
+  resumeSessionId,
+}: {
+  config: SignhifyConfig;
+  projectInstructions?: string;
+  resumeSessionId?: string;
+}) {
   // Mutable copy so runtime settings (/context-limit) survive into the loop
   // that buildLoop constructs on each submit.
   const [config, setConfig] = useState<SignhifyConfig>(initialConfig);
@@ -94,11 +107,23 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
     limit: config.memory?.contextLimit ?? 128000,
   });
   const [activeRouterInfo, setActiveRouterInfo] = useState<string>("not connected");
+  const [tokensPerSecond, setTokensPerSecond] = useState<number | null>(null);
+  const firstOutputAt = useRef<number | null>(null);
+  const activeRun = useRef<AbortController | null>(null);
+  const [pendingConfirmation, setPendingConfirmation] = useState<{
+    message: string;
+    resolve: (allowed: boolean) => void;
+  } | null>(null);
   const [runningTools, setRunningTools] = useState<number>(0);
   const [mcpStatuses, setMcpStatuses] = useState<
     Array<{ name: string; status: "connected" | "failed" | "disabled"; error?: string }>
   >([]);
   const { exit } = useApp();
+
+  useEffect(() => () => {
+    activeRun.current?.abort();
+    void disconnectAllMcpServers();
+  }, []);
 
   const cwd = process.cwd();
   const memoryMd = new MemoryMdManager(cwd);
@@ -107,7 +132,7 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
   const dreamDistill = new DreamDistillEngine(memoryStore, memoryMd);
 
   // Session registry: one row per interactive run; checkpoints link to this id.
-  const [sessionId] = useState(() => memoryStore.createSession(cwd));
+  const [sessionId, setSessionId] = useState(() => memoryStore.createSession(cwd, resumeSessionId));
   const messagesRef = useRef<ChatMessage[]>([]);
   messagesRef.current = messages;
 
@@ -115,33 +140,57 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
     (async () => {
       const [mem, cp] = await Promise.all([
         memoryMd.readMemoryMd(),
-        checkpointWriter.readLatestCheckpoint(),
+        resumeSessionId
+          ? memoryStore.getCheckpointBySession(resumeSessionId)
+          : checkpointWriter.readLatestCheckpoint(),
       ]);
       if (mem) setMemoryContent(mem);
       if (cp) {
         const parts: string[] = [];
         if (cp.summary) parts.push(`## Previous Session Summary\n${cp.summary}`);
-        if (cp.sections.decisions.length)
-          parts.push(`## Decisions\n${cp.sections.decisions.map((d) => `- ${d}`).join("\n")}`);
-        if (cp.sections.openIssues.length)
-          parts.push(`## Open Issues\n${cp.sections.openIssues.map((i) => `- ${i}`).join("\n")}`);
+        if ('sections' in cp && (cp as any).sections) {
+          const sections = (cp as any).sections;
+          if (sections.decisions?.length)
+            parts.push(`## Decisions\n${sections.decisions.map((d: string) => `- ${d}`).join("\n")}`);
+          if (sections.openIssues?.length)
+            parts.push(`## Open Issues\n${sections.openIssues.map((i: string) => `- ${i}`).join("\n")}`);
+          if (sections.taskProgress) setTaskProgress(sections.taskProgress);
+        }
         setCheckpointContent(parts.join("\n\n"));
-        if (cp.sections.taskProgress) setTaskProgress(cp.sections.taskProgress);
+        if ('tokenUsageAtCheckpoint' in cp && cp.tokenUsageAtCheckpoint) {
+          setTokenUsage((prev) => ({ ...prev, used: cp.tokenUsageAtCheckpoint ?? prev.used }));
+        }
+      }
+      if (resumeSessionId) {
+        const cpTokens = cp ? ('tokenUsageAtCheckpoint' in cp ? cp.tokenUsageAtCheckpoint : ('tokenUsage' in (cp as any) ? (cp as any).tokenUsage : 0)) : 0;
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content: `Resumed session [${resumeSessionId}]${cp ? ` (loaded checkpoint at ${cpTokens ?? 0} tokens)` : ` (no prior checkpoints)`}.`,
+          },
+        ]);
       }
     })();
 
     // Real status only: a server that did not connect is never shown as connected.
     const configured = config.mcpServers ?? [];
-    if (configured.length > 0) {
-      connectMcpServers(configured, process.cwd())
-        .then((statuses) => setMcpStatuses(statuses))
-        .catch(() => {
-          // connectMcpServers never throws; keep the sidebar empty rather than guess.
-        });
-    }
+    configureMcpServers(configured);
+    const refreshMcpStatuses = () => {
+      const active = getMcpStatuses();
+      const byName = new Map(active.map((status) => [status.name, status]));
+      setMcpStatuses([
+        ...configured.map((server) => byName.get(server.name) ?? { name: server.name, status: "disabled" as const }),
+        ...active.filter((status) => !configured.some((server) => server.name === status.name)),
+      ]);
+    };
+    refreshMcpStatuses();
+    const mcpStatusInterval = setInterval(refreshMcpStatuses, 1000);
+    return () => clearInterval(mcpStatusInterval);
   }, [config]);
 
   const buildLoop = useCallback(async () => {
+    configureMcpServers(config.mcpServers ?? []);
     let adapter;
     const rawChain =
       config.provider.fallbackChain && config.provider.fallbackChain.length > 0
@@ -175,7 +224,7 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
         // The router only knows an endpoint answered once it streams; report
         // that rather than the configured-but-possibly-dead first entry.
         onEndpointSuccess: (endpointName: string) => {
-          setActiveRouterInfo(endpointName);
+          setActiveRouterInfo(`${endpointName} / ${config.provider.agent.model}`);
         },
       });
       adapter = router;
@@ -188,6 +237,7 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
       adapter,
       model: config.provider.agent.model,
       memory: memoryStore,
+      onProgress: (event) => setMessages((prev) => [...prev, { role: "system", content: `[subagent] ${event.message}` }]),
     });
 
     const loop = new AgentLoop({
@@ -196,6 +246,8 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
       provider: adapter,
       sessionId,
       autoMode: false,
+      projectInstructions,
+      confirm: (message) => new Promise<boolean>((resolve) => setPendingConfirmation({ message, resolve })),
       goal,
       memoryContent,
       checkpointContent,
@@ -217,11 +269,26 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
           });
       },
       onStream: (chunk) => {
+        if (
+          ((chunk.type === "text" && chunk.content) || chunk.type === "tool_call") &&
+          firstOutputAt.current === null
+        ) {
+          firstOutputAt.current = Date.now();
+        }
         if (chunk.type === "done" && chunk.usage) {
+          const prompt = chunk.usage.promptTokens ?? 0;
+          const completion = chunk.usage.completionTokens ?? 0;
+          const total = chunk.usage.totalTokens ?? (prompt + completion);
           setTokenUsage((prev) => ({
             ...prev,
-            used: chunk.usage?.totalTokens ?? prev.used,
+            used: total,
           }));
+        }
+        if (chunk.type === "done") {
+          const elapsedMs = firstOutputAt.current === null ? 0 : Date.now() - firstOutputAt.current;
+          const outputTokens = chunk.usage?.completionTokens;
+          setTokensPerSecond(calculateTokenSpeed(outputTokens, elapsedMs));
+          firstOutputAt.current = null;
         }
         if (chunk.type === "tool_call") {
           setRunningTools((n) => n + 1);
@@ -241,7 +308,7 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
     loop.registerTool(mcpClientTool);
     loop.registerTool(subagentTool);
     return loop;
-  }, [config, mode, goal, memoryContent, checkpointContent, taskProgress]);
+  }, [config, mode, goal, memoryContent, checkpointContent, taskProgress, projectInstructions, sessionId]);
 
   const handleSubmit = useCallback(
     async (value: string) => {
@@ -336,14 +403,17 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
           return;
         }
         if (cmd === "/usage") {
-          const pct = (tokenUsage.used / tokenUsage.limit) * 100;
           setMessages((prev) => [
             ...prev,
             {
               role: "system",
-              content:
-                `Session usage: ${tokenUsage.used.toLocaleString()} / ${tokenUsage.limit.toLocaleString()} tokens ` +
-                `(${pct.toFixed(1)}%). Endpoint: ${activeRouterInfo}. Mode: ${mode}.`,
+              content: formatSessionSummary({
+                usedTokens: tokenUsage.used,
+                limitTokens: tokenUsage.limit,
+                activeRouterInfo,
+                tokensPerSecond,
+                mode,
+              }),
             },
           ]);
           setInput("");
@@ -407,10 +477,39 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
                 rows.length === 0
                   ? "No sessions registered yet."
                   : `Recent sessions (newest first):\n${rows
-                      .map((s) => `${s.id}  ${s.createdAt ?? ""}${s.id === sessionId ? "  (current)" : ""}`)
+                      .map((s) => {
+                        const titlePart = s.title ? ` - "${s.title}"` : "";
+                        const countPart = s.checkpointCount !== undefined ? ` (${s.checkpointCount} checkpoints)` : "";
+                        const curPart = s.id === sessionId ? " (current)" : "";
+                        return `${s.id}${titlePart}  ${s.createdAt ?? ""}${countPart}${curPart}`;
+                      })
                       .join("\n")}`,
             },
           ]);
+          setInput("");
+          return;
+        }
+        if (cmd === "/fork") {
+          try {
+            const forkTitle = arg.trim() || undefined;
+            const forked = memoryStore.forkSession(sessionId, undefined, forkTitle);
+            setSessionId(forked.id);
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: "system",
+                content: `Forked session [${forked.id}]${forked.title ? ` ("${forked.title}")` : ""} from [${sessionId}]. Checkpoints duplicated: ${forked.checkpointCount ?? 0}.`,
+              },
+            ]);
+          } catch (err: unknown) {
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: "system",
+                content: `Failed to fork session: ${err instanceof Error ? err.message : String(err)}`,
+              },
+            ]);
+          }
           setInput("");
           return;
         }
@@ -421,7 +520,7 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
               role: "system",
               content:
                 mcpStatuses.length === 0
-                  ? "No MCP servers connected."
+                  ? "No MCP servers configured or connected."
                   : `MCP servers:\n${mcpStatuses
                       .map(
                         (s) =>
@@ -497,10 +596,14 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
       setIsLoading(true);
 
       try {
+        const controller = new AbortController();
+        activeRun.current = controller;
         const loop = await buildLoop();
-        const result = await loop.run(value);
+        const result = await loop.run(value, controller.signal);
 
-        if (result.error) {
+        if (result.cancelled) {
+          setMessages((prev) => [...prev, { role: "system", content: "Run cancelled. Actions completed before cancellation remain applied." }]);
+        } else if (result.error) {
           setMessages((prev) => [...prev, { role: "assistant", content: result.error! }]);
         } else {
           const lastAssistant = result.messages.filter((m) => m.role === "assistant").pop();
@@ -525,14 +628,34 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
           },
         ]);
       } finally {
+        activeRun.current = null;
         setIsLoading(false);
       }
     },
-    [buildLoop, exit, dreamDistill, messages],
+    [activeRouterInfo, buildLoop, config, dreamDistill, exit, mcpStatuses, memoryContent, memoryStore, messages, mode, sessionId, tokenUsage, tokensPerSecond],
   );
 
   useInput((inputChar, key) => {
-    if (key.ctrl && inputChar === "c") exit();
+    if (key.ctrl && inputChar === "c") {
+      activeRun.current?.abort();
+      pendingConfirmation?.resolve(false);
+      setPendingConfirmation(null);
+      exit();
+    }
+    if (pendingConfirmation) {
+      if (inputChar.toLowerCase() === "y") {
+        pendingConfirmation.resolve(true);
+        setPendingConfirmation(null);
+      } else if (key.escape) {
+        pendingConfirmation.resolve(false);
+        setPendingConfirmation(null);
+        activeRun.current?.abort();
+      } else if (inputChar.toLowerCase() === "n" || key.return) {
+        pendingConfirmation.resolve(false);
+        setPendingConfirmation(null);
+      }
+      return;
+    }
     if (key.ctrl && inputChar === "p") {
       setPaletteOpen((prev) => !prev);
       setPaletteQuery("");
@@ -559,6 +682,10 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
       }
       return;
     }
+    if (key.escape && activeRun.current) {
+      activeRun.current.abort();
+      return;
+    }
     if (key.ctrl && inputChar === "b") setShowSidebar((prev) => !prev);
     if (key.tab) {
       setMode((prev) => {
@@ -574,6 +701,7 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
   const sidebarState: SidebarState = {
     tokenUsage,
     usagePct,
+    tokensPerSecond,
     activeRouterInfo,
     mcpStatuses,
     taskTree,
@@ -602,7 +730,7 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
           React.createElement(Text, { color: modeColor, bold: true }, `[${mode.toUpperCase()}]`),
           goal ? React.createElement(Text, { color: "yellow" }, ` 🎯 "${goal.statement}"`) : null,
         ),
-        React.createElement(Text, { color: "gray" }, "Tab: mode | Ctrl+B: sidebar | Ctrl+P: commands"),
+        React.createElement(Text, { color: "gray" }, "Tab: mode | Esc: cancel run | Ctrl+B: sidebar | Ctrl+P: commands"),
       ),
       React.createElement(
         Box,
@@ -634,7 +762,15 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
         Box,
         null,
         isLoading
-          ? React.createElement(
+          ? pendingConfirmation
+            ? React.createElement(
+                Box,
+                { flexDirection: "column", borderStyle: "round", borderColor: "yellow", paddingX: 1 },
+                React.createElement(Text, { bold: true, color: "yellow" }, "Review requested action"),
+                React.createElement(Text, { wrap: "wrap" }, pendingConfirmation.message),
+                React.createElement(Text, { color: "gray" }, "Y: approve | N: deny | Esc: cancel the run"),
+              )
+            : React.createElement(
               Box,
               null,
               React.createElement(Spinner, { type: "dots" }),
@@ -659,6 +795,12 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
                 placeholder: "Ask a question, enter instructions, or type /help...",
               }),
       ),
+      React.createElement(Footer, {
+        tokensUsed: tokenUsage.used,
+        tokenLimit: tokenUsage.limit,
+        tokensPerSecond,
+        activeRouterInfo,
+      }),
     ),
 
     // Right OpenCode-Style Collapsible Sidebar
@@ -673,7 +815,12 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
   );
 }
 
-export async function runInteractive(config: SignhifyConfig): Promise<void> {
-  // MCP servers connect inside ChatApp so their real status can be rendered.
-  render(React.createElement(ChatApp, { config }));
+export interface InteractiveOptions {
+  resume?: string;
+}
+
+export async function runInteractive(config: SignhifyConfig, options?: InteractiveOptions): Promise<void> {
+  const projectInstructions = await loadProjectInstructions(process.cwd(), config.memory?.tokenBudget);
+  // Configured MCP commands start only after an approved tool call.
+  render(React.createElement(ChatApp, { config, projectInstructions, resumeSessionId: options?.resume }));
 }

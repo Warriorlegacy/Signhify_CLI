@@ -1,9 +1,12 @@
 import * as vscode from 'vscode';
 import { createAdapter } from '@signhify/providers';
+import { getCredential, migrateLegacyApiKeys } from './secret-storage.js';
 
 export class SignhifyInlineCompletionProvider
   implements vscode.InlineCompletionItemProvider
 {
+  constructor(private readonly extensionContext: vscode.ExtensionContext) {}
+
   private lastTriggerTime = 0;
   private readonly minIntervalMs = 200;
   private currentRequest?: {
@@ -78,14 +81,16 @@ export class SignhifyInlineCompletionProvider
   ): Promise<vscode.InlineCompletionItem[]> {
     if (!this.currentRequest) return [];
 
+    await migrateLegacyApiKeys(this.extensionContext);
     const config = vscode.workspace.getConfiguration('signhify');
 
     const vendor = config.get<string>('provider.autocomplete.vendor')
       ?? config.get<string>('provider.agent.vendor', 'openai-compatible');
     const model = config.get<string>('provider.autocomplete.model')
       ?? config.get<string>('provider.agent.model', 'gpt-4');
-    const apiKey = config.get<string>('provider.autocomplete.apiKey')
-      ?? config.get<string>('provider.agent.apiKey', '');
+    const apiKey = await getCredential(this.extensionContext, 'provider.autocomplete.apiKey')
+      ?? await getCredential(this.extensionContext, 'provider.apiKey')
+      ?? '';
     const baseUrl = config.get<string>('provider.autocomplete.baseUrl')
       ?? config.get<string>('provider.agent.baseUrl', '');
 
@@ -103,12 +108,16 @@ export class SignhifyInlineCompletionProvider
     const prompt = `Complete the following code snippet. Only return the completion text, no explanations or markdown.\n\n\`\`\`\n${context}\n\`\`\`\n\nCursor position after: "${textBeforeCursor.slice(-40)}"\nCompletion:`;
 
     let completionText = '';
+    const abortController = new AbortController();
+    const cancellation = token.onCancellationRequested(() => abortController.abort());
     try {
+      if (token.isCancellationRequested) return [];
       const stream = adapter.streamChat({
         messages: [{ role: 'user', content: prompt }],
         tools: [],
         model,
         maxTokens: 128,
+        abortSignal: abortController.signal,
       });
 
       for await (const chunk of stream) {
@@ -119,6 +128,8 @@ export class SignhifyInlineCompletionProvider
       }
     } catch {
       return [];
+    } finally {
+      cancellation.dispose();
     }
 
     const trimmed = completionText.trim();

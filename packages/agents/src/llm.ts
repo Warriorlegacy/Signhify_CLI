@@ -16,7 +16,7 @@ export function shouldUseAdapter(
 
 /** Collect the text of one adapter completion. Tools stay empty: subagents answer, they do not act. */
 export async function completeWithAdapter(
-  ctx: { adapter: ModelProviderAdapter; model?: string },
+  ctx: { adapter: ModelProviderAdapter; model?: string; signal?: AbortSignal },
   system: string,
   user: string,
 ): Promise<string> {
@@ -29,8 +29,10 @@ export async function completeWithAdapter(
     tools: [],
     model: ctx.model ?? 'default',
     maxTokens: 1024,
+    abortSignal: ctx.signal,
   })) {
     if (chunk.type === 'text' && chunk.content) out += chunk.content;
   }
+  if (ctx.signal?.aborted) throw new Error('Subagent cancelled by user');
   return out.trim();
 }

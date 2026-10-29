@@ -19,13 +19,18 @@ if ! command -v node &> /dev/null; then
 fi
 
 echo "✓ Node.js detected: $(node --version)"
+NODE_MAJOR="$(node -p 'Number(process.versions.node.split(".")[0])')"
+if [[ "$NODE_MAJOR" -lt 20 ]]; then
+    echo "✗ Node.js 20 or newer is required (found $(node --version))." >&2
+    exit 1
+fi
 
 # Install via npm
 echo "Installing ${PACKAGE}@${VERSION} ..."
 if [ "$VERSION" = "latest" ]; then
-    npm install -g "${PACKAGE}"
+    npm install -g "${PACKAGE}" || { echo "✗ Installation failed. Check npm output and try again." >&2; exit 1; }
 else
-    npm install -g "${PACKAGE}@${VERSION}"
+    npm install -g "${PACKAGE}@${VERSION}" || { echo "✗ Installation failed. Check npm output and try again." >&2; exit 1; }
 fi
 
 echo "✓ Installation complete!"

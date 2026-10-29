@@ -8,6 +8,7 @@ import {
 const baseState: SidebarState = {
   tokenUsage: { used: 1000, limit: 128000 },
   usagePct: 0.8,
+  tokensPerSecond: null,
   activeRouterInfo: "9router (port 20128)",
   mcpStatuses: [{ name: "rea", status: "connected" }],
   taskTree: [{ id: "T1", parentId: undefined, title: "Root", status: "in_progress" }],

@@ -16,6 +16,7 @@ export interface ModelProviderAdapter {
     model: string;
     temperature?: number;
     maxTokens?: number;
+    abortSignal?: AbortSignal;
   }): AsyncIterable<StreamChunk>;
 
   countTokens(text: string): number;
@@ -60,8 +61,18 @@ export interface ToolHandler {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
-  requiresConsent?: boolean;
-  execute(args: Record<string, unknown>, context: { workingDirectory: string; projectDir?: string; autoMode?: boolean }): Promise<string>;
+  requiresConsent?: boolean | ((args: Record<string, unknown>) => boolean);
+  preview?(args: Record<string, unknown>, context: { workingDirectory: string; projectDir?: string; autoMode?: boolean }): Promise<string>;
+  execute(args: Record<string, unknown>, context: {
+    workingDirectory: string;
+    projectDir?: string;
+    autoMode?: boolean;
+    confirm?: (message: string) => Promise<boolean>;
+    consentGranted?: boolean;
+    approvedPreview?: string;
+    signal?: AbortSignal;
+    invokeTool?: (name: 'file-io' | 'shell-exec', args: Record<string, unknown>) => Promise<{ content: string; isError?: boolean }>;
+  }): Promise<string>;
 }
 
 export interface AgentLoopOptions {
@@ -72,6 +83,7 @@ export interface AgentLoopOptions {
   sessionId?: string;
   goal?: Goal;
   autoMode?: boolean;
+  projectInstructions?: string;
   memoryContent?: string;
   checkpointContent?: string;
   taskProgress?: string;
@@ -79,11 +91,13 @@ export interface AgentLoopOptions {
   onToolCall?: (call: ToolCall) => void;
   onToolResult?: (toolCallId: string, result: string, isError?: boolean) => void;
   onCheckpoint?: (sessionId: string, usage: number) => void;
+  confirm?: (message: string) => Promise<boolean>;
   selfVerifyCommand?: string;
 }
 
 export interface AgentLoopResult {
   success: boolean;
+  cancelled?: boolean;
   messages: Message[];
   toolCalls: Array<{ call: ToolCall; result: string; isError?: boolean }>;
   goalMet?: boolean;
@@ -106,6 +120,7 @@ export class AgentLoop {
   private autoMode: boolean;
   private maxIterations = 20;
   private selfVerifyCommand?: string;
+  private projectInstructions?: string;
   private memoryContent?: string;
   private checkpointContent?: string;
   private taskProgress?: string;
@@ -113,6 +128,7 @@ export class AgentLoop {
   private onToolCall?: (call: ToolCall) => void;
   private onToolResult?: (toolCallId: string, result: string, isError?: boolean) => void;
   private onCheckpoint?: (sessionId: string, usage: number) => void;
+  private confirm?: (message: string) => Promise<boolean>;
   private toolCallHistory: Array<{ call: ToolCall; result: string; isError?: boolean }> = [];
   private filesWrittenSinceLastVerify: string[] = [];
 
@@ -124,6 +140,7 @@ export class AgentLoop {
     this.goal = options.goal;
     this.autoMode = options.autoMode ?? false;
     this.selfVerifyCommand = options.selfVerifyCommand;
+    this.projectInstructions = options.projectInstructions;
     this.memoryContent = options.memoryContent;
     this.checkpointContent = options.checkpointContent;
     this.taskProgress = options.taskProgress;
@@ -131,6 +148,7 @@ export class AgentLoop {
     this.onToolCall = options.onToolCall;
     this.onToolResult = options.onToolResult;
     this.onCheckpoint = options.onCheckpoint;
+    this.confirm = options.confirm;
 
     this.modeManager = new ModeManager(options.config.modes?.custom);
     this.permissionEngine = new PermissionEngine(
@@ -170,7 +188,10 @@ export class AgentLoop {
     return this.contextManager;
   }
 
-  async run(initialMessage: string): Promise<AgentLoopResult> {
+  async run(initialMessage: string, signal?: AbortSignal): Promise<AgentLoopResult> {
+    if (signal?.aborted) {
+      return { success: false, cancelled: true, messages: this.messages, toolCalls: this.toolCallHistory, error: 'Run cancelled by user' };
+    }
     this.messages.push({ role: 'user', content: initialMessage, timestamp: Date.now() });
 
     // Auto-create a root task for this run
@@ -179,11 +200,12 @@ export class AgentLoop {
 
     let iterations = 0;
 
-    while (iterations < this.maxIterations) {
+    while (iterations < this.maxIterations && !signal?.aborted) {
       iterations++;
 
       const context = this.contextManager.assembleContext({
         systemPrompt: this.modeManager.getCurrentMode().prompt,
+        projectInstructions: this.projectInstructions,
         memoryContent: this.memoryContent,
         checkpointContent: this.checkpointContent,
         taskProgress: this.taskProgress,
@@ -192,8 +214,9 @@ export class AgentLoop {
 
       let response: StreamChunk;
       try {
-        response = await this.callProvider(context);
+        response = await this.callProvider(context, signal);
       } catch (error) {
+        if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) return this.cancelledResult(rootTaskId);
         return {
           success: false,
           messages: this.messages,
@@ -202,7 +225,10 @@ export class AgentLoop {
         };
       }
 
+      if (signal?.aborted) return this.cancelledResult(rootTaskId);
+
       if (response.type === 'error') {
+        if (signal?.aborted) return this.cancelledResult(rootTaskId);
         return {
           success: false,
           messages: this.messages,
@@ -213,10 +239,11 @@ export class AgentLoop {
 
       if (response.type === 'text') {
         this.messages.push({ role: 'assistant', content: response.content ?? '', timestamp: Date.now() });
-        await this.taskManager.completeTask(rootTaskId);
 
         if (this.goal) {
-          const verdict = await this.checkGoal();
+          const verdict = await this.checkGoal(signal);
+          if (signal?.aborted) return this.cancelledResult(rootTaskId);
+          await this.taskManager.completeTask(rootTaskId);
           return {
             success: verdict?.met ?? false,
             messages: this.messages,
@@ -226,6 +253,7 @@ export class AgentLoop {
           };
         }
 
+        await this.taskManager.completeTask(rootTaskId);
         return {
           success: true,
           messages: this.messages,
@@ -234,8 +262,9 @@ export class AgentLoop {
       }
 
       if (response.type === 'tool_call' && response.toolCall) {
-        const result = await this.executeToolCall(response.toolCall);
+        const result = await this.executeToolCall(response.toolCall, signal);
         this.toolCallHistory.push({ call: response.toolCall, result: result.content, isError: result.isError });
+        this.onToolResult?.(response.toolCall.id, result.content, result.isError);
         this.messages.push({
           role: 'assistant',
           content: '',
@@ -249,9 +278,11 @@ export class AgentLoop {
           timestamp: Date.now(),
         });
 
+        if (signal?.aborted) return this.cancelledResult(rootTaskId);
+
         // Self-verify after tool execution if files were changed
         if (this.filesWrittenSinceLastVerify.length > 0 && this.selfVerifyCommand) {
-          const verifyResult = await this.runSelfVerify();
+          const verifyResult = await this.runSelfVerify(signal);
           if (verifyResult.isError) {
             // Let the model see the verification failure and loop back
             this.messages.push({
@@ -273,6 +304,7 @@ export class AgentLoop {
       }
     }
 
+    if (signal?.aborted) return this.cancelledResult(rootTaskId);
     await this.taskManager.blockTask(rootTaskId, 'Max iterations reached');
     return {
       success: false,
@@ -282,7 +314,12 @@ export class AgentLoop {
     };
   }
 
-  private async callProvider(context: ContextAssemblyResult): Promise<StreamChunk> {
+  private async cancelledResult(rootTaskId: string): Promise<AgentLoopResult> {
+    await this.taskManager.blockTask(rootTaskId, 'Run cancelled by user');
+    return { success: false, cancelled: true, messages: this.messages, toolCalls: this.toolCallHistory, error: 'Run cancelled by user' };
+  }
+
+  private async callProvider(context: ContextAssemblyResult, signal?: AbortSignal): Promise<StreamChunk> {
     if (!this.provider) {
       return { type: 'text', content: 'No provider configured. Set a provider in config.' };
     }
@@ -292,6 +329,7 @@ export class AgentLoop {
       messages: context.messages,
       tools,
       model: this.config.provider.agent.model,
+      abortSignal: signal,
     });
 
     let accumulatedText = '';
@@ -299,6 +337,7 @@ export class AgentLoop {
     const toolCallChunks: Record<string, string> = {};
 
     for await (const chunk of stream) {
+      if (signal?.aborted) throw new Error('Run cancelled by user');
       this.onStream?.(chunk);
 
       if (chunk.type === 'text' && chunk.content) {
@@ -341,6 +380,8 @@ export class AgentLoop {
       }
     }
 
+    if (signal?.aborted) throw new Error('Run cancelled by user');
+
     if (currentToolCall) {
       let args: Record<string, unknown> = {};
       try {
@@ -354,7 +395,8 @@ export class AgentLoop {
     return { type: 'text', content: accumulatedText };
   }
 
-  private async executeToolCall(call: ToolCall): Promise<{ content: string; isError?: boolean }> {
+  private async executeToolCall(call: ToolCall, signal?: AbortSignal): Promise<{ content: string; isError?: boolean }> {
+    if (signal?.aborted) return { content: 'Run cancelled by user', isError: true };
     const permission = this.permissionEngine.canUseTool(call.name);
     if (!permission.allowed) {
       return { content: `Permission denied: ${permission.reason}`, isError: true };
@@ -365,12 +407,30 @@ export class AgentLoop {
       return { content: `Unknown tool: ${call.name}`, isError: true };
     }
 
-    // Check requiresConsent flag from the tool handler
-    if (handler.requiresConsent && !this.autoMode) {
-      const confirmed = await this.promptConfirmation(`Execute ${call.name}`);
+    let consentGranted = false;
+    let approvedPreview: string | undefined;
+    // Read-only tool actions can share a handler with actions that need approval.
+    const requiresConsent = typeof handler.requiresConsent === 'function'
+      ? handler.requiresConsent(call.arguments)
+      : handler.requiresConsent;
+    if (requiresConsent && !this.autoMode) {
+      let preview = '';
+      if (handler.preview) {
+        try {
+          preview = `\n${await handler.preview(call.arguments, {
+            workingDirectory: this.workingDirectory,
+            projectDir: this.workingDirectory,
+            autoMode: this.autoMode,
+          })}`;
+        } catch (error) {
+          return { content: `Tool action denied: ${error instanceof Error ? error.message : String(error)}`, isError: true };
+        }
+      }
+      const confirmed = await this.promptConfirmation(`Execute ${call.name}${preview}`, signal);
       if (!confirmed) {
         return { content: `${call.name} denied by user consent`, isError: true };
       }
+      consentGranted = true;
     }
 
     if (call.name === 'shell-exec') {
@@ -380,7 +440,7 @@ export class AgentLoop {
         return { content: `Permission denied: ${shellPerm.reason}`, isError: true };
       }
       if (shellPerm.requiresConfirmation && !this.autoMode) {
-        const confirmed = await this.promptConfirmation(`Execute shell command: ${cmd}`);
+        const confirmed = await this.promptConfirmation(`Execute shell command: ${cmd}`, signal);
         if (!confirmed) {
           return { content: 'Shell command denied by user', isError: true };
         }
@@ -394,6 +454,25 @@ export class AgentLoop {
         return { content: `Permission denied: ${filePerm.reason}`, isError: true };
       }
       if (action === 'write') {
+        if (!this.autoMode) {
+          if (!handler.preview) {
+            return { content: 'File write denied: this tool cannot provide a review preview', isError: true };
+          }
+          let preview: string;
+          try {
+            preview = await handler.preview(call.arguments, {
+              workingDirectory: this.workingDirectory,
+              projectDir: this.workingDirectory,
+              autoMode: this.autoMode,
+            });
+          } catch (error) {
+            return { content: `File write denied: ${error instanceof Error ? error.message : String(error)}`, isError: true };
+          }
+          const confirmed = await this.promptConfirmation(`${preview}\n\nApply this file write?`, signal);
+          if (!confirmed) return { content: 'File write denied by user', isError: true };
+          consentGranted = true;
+          approvedPreview = preview;
+        }
         this.filesWrittenSinceLastVerify.push((call.arguments.path as string) ?? '');
       }
     }
@@ -403,29 +482,51 @@ export class AgentLoop {
         workingDirectory: this.workingDirectory,
         projectDir: this.workingDirectory,
         autoMode: this.autoMode,
+        confirm: this.confirm,
+        consentGranted,
+        approvedPreview,
+        signal,
+        invokeTool: async (name, args) => {
+          const nestedCall: ToolCall = {
+            id: `${call.id}:${name}:${this.toolCallHistory.length}`,
+            name,
+            arguments: args,
+          };
+          this.onToolCall?.(nestedCall);
+          const nestedResult = await this.executeToolCall(nestedCall, signal);
+          this.toolCallHistory.push({ call: nestedCall, result: nestedResult.content, isError: nestedResult.isError });
+          this.onToolResult?.(nestedCall.id, nestedResult.content, nestedResult.isError);
+          return nestedResult;
+        },
       });
       return { content: result };
     } catch (error) {
+      if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
+        return { content: 'Run cancelled by user', isError: true };
+      }
       return { content: `Tool error: ${error instanceof Error ? error.message : String(error)}`, isError: true };
     }
   }
 
-  private async runSelfVerify(): Promise<{ content: string; isError?: boolean }> {
+  private async runSelfVerify(signal?: AbortSignal): Promise<{ content: string; isError?: boolean }> {
     const tool = this.toolHandlers.get('shell-exec');
     if (!tool) return { content: 'No shell-exec tool registered for self-verify', isError: true };
 
     try {
       const result = await tool.execute(
         { command: this.selfVerifyCommand!, timeoutMs: 120000 },
-        { workingDirectory: this.workingDirectory, projectDir: this.workingDirectory, autoMode: this.autoMode }
+        { workingDirectory: this.workingDirectory, projectDir: this.workingDirectory, autoMode: this.autoMode, signal }
       );
       return { content: result };
     } catch (error) {
+      if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
+        return { content: 'Run cancelled by user', isError: true };
+      }
       return { content: `Self-verify error: ${error instanceof Error ? error.message : String(error)}`, isError: true };
     }
   }
 
-  async checkGoal(): Promise<GoalVerdict | null> {
+  async checkGoal(signal?: AbortSignal): Promise<GoalVerdict | null> {
     if (!this.goal || !this.provider) return null;
 
     const transcript = this.messages
@@ -447,6 +548,7 @@ export class AgentLoop {
         ],
         tools: [],
         model: this.config.provider.agent.model,
+        abortSignal: signal,
       });
 
       let verdictText = '';
@@ -477,14 +579,42 @@ export class AgentLoop {
     this.goal = goal;
   }
 
-  private async promptConfirmation(message: string): Promise<boolean> {
+  private async promptConfirmation(message: string, signal?: AbortSignal): Promise<boolean> {
     if (this.autoMode) return true;
+    if (signal?.aborted) return false;
+
+    if (this.confirm) {
+      return new Promise((resolve, reject) => {
+        const cleanup = () => signal?.removeEventListener('abort', onAbort);
+        const onAbort = () => {
+          cleanup();
+          resolve(false);
+        };
+        signal?.addEventListener('abort', onAbort, { once: true });
+        this.confirm!(message).then(
+          (approved) => {
+            cleanup();
+            resolve(approved);
+          },
+          (error) => {
+            cleanup();
+            reject(error);
+          },
+        );
+      });
+    }
 
     const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
     return new Promise((resolve) => {
-      rl.question(`\n${message}\nAllow? (y/N) `, (answer) => {
+      const finish = (approved: boolean) => {
+        signal?.removeEventListener('abort', onAbort);
         rl.close();
-        resolve(answer.trim().toLowerCase() === 'y');
+        resolve(approved);
+      };
+      const onAbort = () => finish(false);
+      signal?.addEventListener('abort', onAbort, { once: true });
+      rl.question(`\n${message}\nAllow? (y/N) `, (answer) => {
+        finish(answer.trim().toLowerCase() === 'y');
       });
     });
   }

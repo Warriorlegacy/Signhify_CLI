@@ -39,6 +39,9 @@ export {
   AgentLoop,
 } from './agent-loop.js';
 
+export { loadProjectInstructions } from './project-instructions.js';
+export { AbortError } from './errors.js';
+
 export {
   type TaskNode,
   TaskManager,

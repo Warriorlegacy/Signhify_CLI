@@ -4,6 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import { randomUUID } from "node:crypto";
 import type { SignhifyConfig } from "@signhify/core";
 
 interface KeytarModule {
@@ -44,6 +45,23 @@ export async function signhifyConfigSchema(config: SignhifyConfig): Promise<Sign
   return config;
 }
 
+async function validateConfigBeforeSecretStorage(config: SignhifyConfig): Promise<void> {
+  const candidate = JSON.parse(JSON.stringify(config)) as SignhifyConfig;
+  const entries = [
+    candidate?.provider?.agent,
+    candidate?.provider?.autocomplete,
+    ...(candidate?.provider?.fallbackChain ?? []),
+  ];
+  for (const entry of entries) {
+    if (typeof entry?.apiKeyRef === "string" && entry.apiKeyRef &&
+      !/^env:[A-Za-z_][A-Za-z0-9_]*$/.test(entry.apiKeyRef) &&
+      !/^keytar:signhify:.+$/.test(entry.apiKeyRef)) {
+      entry.apiKeyRef = "env:SIGNHIFY_SECRET_PLACEHOLDER";
+    }
+  }
+  await signhifyConfigSchema(candidate);
+}
+
 /** Minimal JSON Schema subset covering exactly the constructs the shipped file uses. */
 interface JsonObjectSchema {
   type?: string;
@@ -51,6 +69,7 @@ interface JsonObjectSchema {
   items?: JsonObjectSchema;
   required?: string[];
   enum?: string[];
+  pattern?: string;
   additionalProperties?: boolean;
   minimum?: number;
   maximum?: number;
@@ -119,6 +138,9 @@ function validateAgainstSchema(
       if (schema.enum && !schema.enum.includes(value)) {
         return [`${at} must be one of: ${schema.enum.join(", ")}`];
       }
+      if (schema.pattern && !new RegExp(schema.pattern).test(value)) {
+        return [`${at} must match ${schema.pattern}`];
+      }
       return [];
     }
     case "integer": {
@@ -145,6 +167,7 @@ function validateAgainstSchema(
  * only allows `apiKeyRef`. Map legacy → ref in place before validation.
  */
 function migrateLegacyApiKey(config: SignhifyConfig): SignhifyConfig {
+  if (!config || typeof config !== "object" || Array.isArray(config)) return config;
   const agent = config.provider?.agent;
   if (agent) {
     if (agent.apiKey !== undefined && agent.apiKeyRef === undefined) {
@@ -174,60 +197,88 @@ export async function resolveApiKeyRef(ref: string | undefined): Promise<string 
 export async function loadConfig(projectDir?: string): Promise<SignhifyConfig> {
   const dir = projectDir ?? process.cwd();
   const projectConfigPath = path.join(dir, ".signhify", "config.json");
-  try {
-    const content = await fs.readFile(projectConfigPath, "utf-8");
-    const parsed = migrateLegacyApiKey(JSON.parse(content) as SignhifyConfig);
-    await signhifyConfigSchema(parsed as SignhifyConfig);
-    return { ...DEFAULT_CONFIG, ...(await resolveAgentApiKey(parsed as SignhifyConfig)) } as SignhifyConfig;
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith("Config validation failed")) throw error;
-    // no project config
-  }
+  const projectConfig = await loadConfigFile(projectConfigPath);
+  if (projectConfig) return { ...DEFAULT_CONFIG, ...projectConfig } as SignhifyConfig;
 
   const globalConfigPath = path.join(os.homedir(), ".config", "signhify", "config.json");
-  try {
-    const content = await fs.readFile(globalConfigPath, "utf-8");
-    const parsed = migrateLegacyApiKey(JSON.parse(content) as SignhifyConfig);
-    await signhifyConfigSchema(parsed as SignhifyConfig);
-    return { ...DEFAULT_CONFIG, ...(await resolveAgentApiKey(parsed as SignhifyConfig)) } as SignhifyConfig;
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith("Config validation failed")) throw error;
-    // no global config
-  }
+  const globalConfig = await loadConfigFile(globalConfigPath);
+  if (globalConfig) return { ...DEFAULT_CONFIG, ...globalConfig } as SignhifyConfig;
 
   return DEFAULT_CONFIG;
 }
 
+async function loadConfigFile(configPath: string): Promise<SignhifyConfig | undefined> {
+  let content: string;
+  try {
+    content = await fs.readFile(configPath, "utf-8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+
+  const parsed = migrateLegacyApiKey(JSON.parse(content) as SignhifyConfig);
+  await validateConfigBeforeSecretStorage(parsed);
+  const secured = await storeKeytarRefs(parsed);
+  await signhifyConfigSchema(secured);
+  if (JSON.stringify(parsed) !== JSON.stringify(secured)) {
+    await writeConfigFile(configPath, secured);
+  }
+  return resolveAgentApiKey(secured);
+}
+
 export async function saveConfig(config: SignhifyConfig, projectDir?: string): Promise<void> {
   migrateLegacyApiKey(config);
-  const validated = await signhifyConfigSchema(config);
-  const toSave = await storeKeytarRefs(validated);
+  await validateConfigBeforeSecretStorage(config);
+  const toSave = await storeKeytarRefs(config);
+  await signhifyConfigSchema(toSave);
   const dir = projectDir ?? process.cwd();
   const configDir = path.join(dir, ".signhify");
   await fs.mkdir(configDir, { recursive: true });
-  await fs.writeFile(path.join(configDir, "config.json"), JSON.stringify(toSave, null, 2), "utf-8");
+  await writeConfigFile(path.join(configDir, "config.json"), toSave);
+}
+
+async function writeConfigFile(configPath: string, config: SignhifyConfig): Promise<void> {
+  await fs.mkdir(path.dirname(configPath), { recursive: true });
+  const tempPath = `${configPath}.${randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(tempPath, JSON.stringify(config, null, 2), { encoding: "utf-8", flag: "wx", mode: 0o600 });
+    await fs.rename(tempPath, configPath);
+  } catch (error) {
+    await fs.unlink(tempPath).catch(() => undefined);
+    throw error;
+  }
 }
 
 async function storeKeytarRefs(config: SignhifyConfig): Promise<SignhifyConfig> {
-  const resolvedRef = config.provider?.agent?.apiKeyRef;
-  // Plaintext refs are keychain candidates; env:/missing are left alone.
-  if (!keytar || !resolvedRef || resolvedRef.startsWith("env:") || resolvedRef.startsWith("keytar:")) {
-    return config;
-  }
+  const store = async <T extends { model: string; apiKeyRef?: string }>(value: T, account: string): Promise<T> => {
+    const ref = value.apiKeyRef;
+    if (!ref || ref.startsWith("env:") || ref.startsWith("keytar:")) return value;
+    if (!keytar) throw new Error("Cannot save a literal API key because OS keychain support is unavailable. Set apiKeyRef to env:VARIABLE or install keytar.");
+    try {
+      await keytar.setPassword(KEYTAR_SERVICE, account, ref);
+    } catch {
+      throw new Error("Could not store the API key in the OS credential store; Signhify did not save the config file.");
+    }
+    return { ...value, apiKeyRef: `keytar:${KEYTAR_SERVICE}:${account}` };
+  };
 
-  const account = config.provider.agent.model;
-  try {
-    await keytar.setPassword(KEYTAR_SERVICE, account, resolvedRef);
-    const agent = { ...config.provider.agent };
-    delete (agent as Record<string, unknown>).apiKey;
-    return {
-      ...config,
-      provider: { ...config.provider, agent: { ...agent, apiKeyRef: `keytar:${KEYTAR_SERVICE}:${account}` } },
-    };
-  } catch {
-    // keychain write failed — keep the literal ref in config
-    return config;
-  }
+  const provider = config.provider;
+  const agent = await store(provider.agent, provider.agent.model);
+  const autocomplete = provider.autocomplete
+    ? await store(provider.autocomplete, `autocomplete:${provider.autocomplete.model}`)
+    : undefined;
+  const fallbackChain = provider.fallbackChain
+    ? await Promise.all(provider.fallbackChain.map((endpoint) => store(endpoint, `fallback:${endpoint.name}:${endpoint.model}`)))
+    : undefined;
+  return {
+    ...config,
+    provider: {
+      ...provider,
+      agent,
+      ...(autocomplete ? { autocomplete } : {}),
+      ...(fallbackChain ? { fallbackChain } : {}),
+    },
+  };
 }
 
 async function resolveAgentApiKey(config: SignhifyConfig): Promise<SignhifyConfig> {

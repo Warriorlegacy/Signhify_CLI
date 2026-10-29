@@ -75,6 +75,7 @@ export function createAISDKAdapter(config: {
     model: string;
     temperature?: number;
     maxTokens?: number;
+    abortSignal?: AbortSignal;
   }): AsyncIterable<StreamChunk> {
     try {
       const model = config.getModel(params.model);
@@ -90,6 +91,7 @@ export function createAISDKAdapter(config: {
         model,
         system,
         messages: nonSystemMessages,
+        abortSignal: params.abortSignal,
         ...callOptions,
       });
 
@@ -121,7 +123,8 @@ export function createMockAdapter(options?: {
     id: vendor,
     vendor,
     supportsFunctionCalling: true,
-    async *streamChat() {
+    async *streamChat(params) {
+      if (params.abortSignal?.aborted) return;
       const response = responses?.shift() ?? 'Task completed successfully by mock provider.';
       yield { type: 'text', content: response };
       yield {

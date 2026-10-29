@@ -3,10 +3,12 @@
   "$id": "https://signhify.dev/schema/signhify.config.json",
   "type": "object",
   "additionalProperties": false,
+  "required": ["provider"],
   "properties": {
     "provider": {
       "type": "object",
       "additionalProperties": false,
+      "required": ["agent"],
       "properties": {
         "agent": {
           "$ref": "#/$defs/providerConfig"
@@ -104,7 +106,8 @@
         },
         "apiKeyRef": {
           "type": "string",
-          "description": "API key reference. Format: 'env:VAR_NAME' or literal key."
+          "pattern": "^(env:[A-Za-z_][A-Za-z0-9_]*|keytar:signhify:.+)$",
+          "description": "Secret reference: env:VARIABLE or keytar:signhify:account. Literal keys are migrated to the OS keychain before config is saved."
         },
         "baseUrl": {
           "type": "string",
@@ -131,7 +134,8 @@
         },
         "apiKeyRef": {
           "type": "string",
-          "description": "API key reference or literal key."
+          "pattern": "^(env:[A-Za-z_][A-Za-z0-9_]*|keytar:signhify:.+)$",
+          "description": "Secret reference: env:VARIABLE or keytar:signhify:account."
         },
         "baseUrl": {
           "type": "string",
@@ -184,13 +188,9 @@
         },
         "transport": {
           "type": "string",
-          "enum": ["stdio", "sse", "http"],
+          "enum": ["stdio"],
           "default": "stdio",
-          "description": "MCP transport protocol."
-        },
-        "url": {
-          "type": "string",
-          "description": "URL for remote SSE or HTTP MCP server."
+          "description": "MCP transport protocol. Only local stdio servers are currently supported."
         }
       },
       "required": ["name"]

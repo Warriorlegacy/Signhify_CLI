@@ -10,6 +10,15 @@ export interface SubagentTask {
   role: SubagentRole;
   objective: string;
   context?: Record<string, unknown>;
+  dependsOn?: string[];
+  parentId?: string | null;
+}
+
+export interface ReviewVerdict {
+  met: boolean;
+  reason: string;
+  remainingSteps: string[];
+  exitCode?: number;
 }
 
 export interface SubagentResult {
@@ -27,6 +36,7 @@ export interface TaskPersister {
     parentId?: string | null;
     title: string;
     status?: 'pending' | 'in_progress' | 'blocked' | 'done';
+    progressLog?: string;
   }): void;
 }
 
@@ -34,7 +44,10 @@ export interface TaskPersister {
 export interface SubagentContext {
   adapter?: import('@signhify/providers').ModelProviderAdapter;
   model?: string;
+  signal?: AbortSignal;
   memory?: TaskPersister;
+  invokeTool?: (name: 'file-io' | 'shell-exec', args: Record<string, unknown>) => Promise<{ content: string; isError?: boolean }>;
+  onProgress?: (event: SubagentProgressEvent) => void;
 }
 
 export interface SubagentProgressEvent {

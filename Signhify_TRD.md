@@ -32,7 +32,7 @@ Rationale: this mirrors the shared-core-plus-frontends pattern used by OpenCode/
 | CLI TUI | Ink (React for CLIs) or Bubble Tea-equivalent JS lib | Interactive terminal rendering |
 | VS Code extension | VS Code Extension API (TypeScript) | Webview for chat, native API for inline completion |
 | Persistent memory | SQLite with FTS5 extension | Local-first, fast full-text search over memory/notes/checkpoints |
-| Inter-process transport | JSON-RPC 2.0 over stdio/websocket | Shared between core-daemon and CLI/extension clients; same pattern as MCP transport [web:18] |
+| Inter-process transport | Not implemented | CLI and VS Code instantiate the shared TypeScript core directly. A JSON-RPC daemon remains a future target only if separate processes are needed. |
 | Model provider protocol | Provider-agnostic adapter interface (REST/streaming) | One adapter per vendor + generic OpenAI-compatible adapter |
 | Extensibility protocol | Model Context Protocol (MCP), spec 2025-03-26 | JSON-RPC based; hosts/clients/servers model [web:18] |
 | Packaging | npm (`@signhify/cli`, `@signhify/vscode`) + curl installer script | Matches MiMo Code's npm + curl install patterns |
@@ -64,6 +64,16 @@ Permission matrix enforced per mode and per execution context (interactive vs. `
 | Compose/Orchestrator | Allow (delegates to subagents) | Allow | Allow | Allow |
 
 `--auto` mode additionally requires: an explicit allowlist/denylist of shell command patterns defined in `.signhify/signhify.json` under `automation.shellAllowlist` / `automation.shellDenylist`.
+
+### 2.3 Project Instructions and Skills
+
+The shared core receives repository guidance from root and nested `AGENTS.md` and `CLAUDE.md` files. Each source is shown with a repository-relative path and applies only under its directory; deeper scopes override ancestor scopes, and `AGENTS.md` takes precedence over `CLAUDE.md` in the same directory. Discovery skips `.git`, `.refs`, `.freebuff`, `node_modules`, build output, coverage, editor/deployment metadata, and `.signhify`; it does not follow directory symlinks and is bounded by the configured context budget.
+
+Project-local skills under `.agents/skills/`, `.claude/skills/`, and `.codex/skills/` appear in the context as a name, description, and source path. The agent reads a matching `SKILL.md` on demand. Project instruction and skill content is untrusted input: it cannot override application policy, mode restrictions, or tool consent checks.
+
+### 2.4 Role-Based Subagent Pipeline
+
+`subagent` supports single-role dispatch and pipelines of up to ten tasks. Tasks use explicit `dependsOn` identifiers; tasks without dependencies retain sequential behavior. Only explicitly independent FilePicker and BrowserUse tasks may execute concurrently, with a maximum of two workers. Planner, Editor, and Reviewer remain sequential. Task states and parent links are stored through the memory task persister; failures are returned per task and block only dependent tasks. Editor file changes and Reviewer commands execute through the host `file-io` and `shell-exec` permission paths. Pressing Esc in the interactive CLI aborts provider, shell, and browser work, sends `notifications/cancelled` for in-flight MCP requests, and blocks queued pipeline tasks. MCP cancellation is cooperative: a server may continue work, and completed side effects are not rolled back.
 
 ---
 
@@ -178,13 +188,14 @@ Implementations: `AnthropicAdapter`, `GoogleGeminiAdapter`, `OpenAIAdapter`, `Op
 
 ### 6.2 Chat/Agent Webview
 - Implemented as a `WebviewViewProvider` registered in a custom Activity Bar container.
-- Communicates with the core engine over a local JSON-RPC channel (same protocol used by CLI), ensuring feature parity and shared session/memory state between CLI and extension.
+- Current implementation calls the shared `AgentLoop` directly in the extension host; there is no local JSON-RPC service or shared cross-process session store.
+- The chat view exposes cancellation for the active run and forwards it to `AgentLoop`; supported provider/tool operations stop cooperatively, while completed side effects remain applied.
 - Diff review UI reuses VS Code's built-in diff editor (`vscode.diff` command) for hunk-level accept/reject.
 
 ### 6.3 Extension Manifest Essentials
 - `activationEvents`: `onStartupFinished`, `onCommand:signhify.newTask`.
 - `contributes.commands`: New Task, Switch Mode, Open Memory, Trigger Inline Completion.
-- `contributes.configuration`: exposes provider/model/API key settings surfaced from the shared config schema.
+- `contributes.configuration`: exposes provider/model settings. Provider keys use VS Code `SecretStorage`, not settings JSON.
 
 ---
 
@@ -193,16 +204,16 @@ Implementations: `AnthropicAdapter`, `GoogleGeminiAdapter`, `OpenAIAdapter`, `Op
 - Entry binary `signhify`, built with a Node-based CLI framework (e.g., Ink + yargs/commander for argument parsing).
 - Interactive mode: REPL-style chat loop rendered with Ink components (task tree sidebar, streaming response pane, mode indicator).
 - Non-interactive mode: `signhify run "<task>" --auto --output json` — suppresses all prompts, emits structured JSON result and process exit code (0 success, 1 failure, 2 goal-not-met after max iterations).
-- First-run wizard implemented as a guided Ink flow: choose (a) free trial, (b) OAuth login, (c) import credentials, (d) manual key entry; writes result to global config.
+- First-run wizard is a guided Ink flow; provider settings are written to project-local `.signhify/config.json`.
 
 ---
 
 ## 8. MCP Integration Details
 
 - Signhify's core acts as an **MCP Host**, embedding an **MCP Client** that connects to user-declared **MCP Servers** listed in `signhify.config.json` under `mcpServers` [web:18][web:31].
-- Transport: stdio for locally spawned servers, HTTP+SSE/WebSocket for remote servers, per MCP spec 2025-03-26 [web:18].
-- Servers may expose Resources (context/data), Prompts (templated workflows), and Tools (invocable functions); Signhify surfaces all three in the agent's available-tool list dynamically at session start [web:18].
-- Security: explicit user consent required before any MCP tool invocation is executed, and before any resource data is shared with the model, per MCP's security principles [web:18].
+- Current transport: local stdio only. The schema rejects `sse` and `http`; remote transports are a separate future feature.
+- The client can list server Tools, Resources, and Prompts and invoke Tools through `mcp-client`; discovered tools are not injected as direct model functions.
+- Configured MCP servers remain stopped on startup. Connect, invocation, and disconnect require approval; all three actions are denied in `--auto` mode. Read-only server/tool status does not start a process. MCP subprocesses inherit the Signhify process environment, and the connection preview discloses that fact.
 
 ---
 
@@ -225,8 +236,8 @@ Implementations: `AnthropicAdapter`, `GoogleGeminiAdapter`, `OpenAIAdapter`, `Op
 ## 11. Security & Sandbox Requirements
 
 - Shell execution confined to the project working directory unless explicitly allowlisted otherwise.
-- API keys stored via OS keychain (`keytar` or platform equivalent) where available, falling back to encrypted local file.
-- All MCP tool invocations and shell commands require explicit consent in interactive mode; in `--auto` mode, consent is replaced by the pre-declared allowlist/denylist config, never implicit blanket trust.
+- CLI literal keys are stored via OS keychain (`keytar`); saves fail if keychain storage is unavailable. Environment-variable references remain supported. VS Code keys use `SecretStorage`.
+- Shell commands use the permission engine and interactive consent; MCP connect/invoke/disconnect is disabled in `--auto` mode. Shell allowlists/denylists do not authorize MCP subprocesses.
 - No telemetry or code transmission to Signhify-operated infrastructure outside the optional hosted free-trial/OAuth channel, which must be clearly disclosed and opt-in.
 
 ---

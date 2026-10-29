@@ -95,9 +95,7 @@ export interface McpServerConfig {
   name: string;
   command?: string;
   args?: string[];
-  transport?: 'stdio' | 'sse' | 'http';
-  url?: string;
-  env?: Record<string, string>;
+  transport?: 'stdio';
 }
 
 // Goal/stop condition
@@ -114,6 +112,7 @@ export interface GoalVerdict {
 
 export interface AgentLoopResult {
   success: boolean;
+  cancelled?: boolean;
   messages: Message[];
   toolCalls: Array<{ call: ToolCall; result: string; isError?: boolean }>;
   goalMet?: boolean;

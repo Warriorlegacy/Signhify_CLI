@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { render, Box, Text } from 'ink';
 import TextInput from 'ink-text-input';
-import { signhifyConfigSchema, saveConfig } from './config.js';
+import { saveConfig } from './config.js';
 
 type WizardStep = 'choice' | 'provider' | 'model' | 'apikey' | 'done';
 
@@ -68,7 +68,6 @@ function WizardApp() {
       },
     };
     try {
-      await signhifyConfigSchema(cfg);
       await saveConfig(cfg);
       advance('done');
       setError('');
@@ -111,7 +110,7 @@ function WizardApp() {
         : step === 'apikey'
           ? React.createElement(Box, { flexDirection: 'column' },
               React.createElement(Text, { bold: true }, `Model: ${model} (${provider})`),
-              React.createElement(Text, {}, 'Enter your API key:'),
+              React.createElement(Text, {}, 'Enter your API key, or env:VARIABLE to use an environment variable:'),
               React.createElement(Box, { marginTop: 1 },
                 React.createElement(TextInput, { value: '', onChange: handleApiKey, placeholder: 'sk-...', mask: '*' })
               )

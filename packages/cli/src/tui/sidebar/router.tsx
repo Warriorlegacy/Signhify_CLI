@@ -1,6 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import type { SidebarSection, SidebarState } from "./index.js";
+import { formatTokenSpeed } from "../../tokens.js";
 
 export function createRouterSection(): SidebarSection {
   return {
@@ -22,6 +23,11 @@ export function createRouterSection(): SidebarSection {
           null,
           React.createElement(Text, { color: "green" }, "● "),
           React.createElement(Text, {}, state.activeRouterInfo),
+        ),
+        React.createElement(
+          Text,
+          { color: "gray" },
+          `Output speed: ${formatTokenSpeed(state.tokensPerSecond)}`,
         ),
       );
     },

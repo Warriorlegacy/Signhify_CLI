@@ -7,17 +7,22 @@ export class FilePickerSubagent implements Subagent {
   readonly name = '@FilePicker';
   readonly description = 'Explores repository layout and discovers minimal relevant files for a coding task';
 
-  async run(task: SubagentTask, cwd: string, _ctx?: SubagentContext): Promise<SubagentResult> {
+  async run(task: SubagentTask, cwd: string, ctx?: SubagentContext): Promise<SubagentResult> {
+    if (ctx?.signal?.aborted) {
+      return { success: false, output: '', error: 'Subagent cancelled by user' };
+    }
     const matchedFiles: string[] = [];
     const query = (task.objective || '').toLowerCase();
     const keywords = query.split(/\s+/).filter(k => k.length > 2);
 
     try {
       const walk = async (dir: string, depth = 0): Promise<void> => {
+        if (ctx?.signal?.aborted) throw new Error('Subagent cancelled by user');
         if (depth > 4) return;
         const entries = await fs.readdir(dir, { withFileTypes: true });
 
         for (const entry of entries) {
+          if (ctx?.signal?.aborted) throw new Error('Subagent cancelled by user');
           if (
             entry.name.startsWith('.') ||
             entry.name === 'node_modules' ||

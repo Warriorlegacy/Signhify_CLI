@@ -38,9 +38,12 @@ Signhify CLI is an AI-native developer tooling platform that that plans, writes,
 ## Features
 
 - **Multi-agent modes** — Build (full access), Plan (read-only), Debug, Compose
+- **Role-based subagents** — dependency-aware pipelines, persisted task states, and bounded parallel discovery; edits and commands still pass through host permissions
+- **Run cancellation** — press Esc in the interactive CLI to stop provider streaming and shell work and block queued subagent tasks
 - **Multi-provider** — OpenAI, Anthropic, Google Gemini, or any OpenAI-compatible endpoint (Ollama, Groq, OpenRouter, etc.)
 - **Two-tier model routing** — fast model for inline autocomplete, reasoning model for agent loop
 - **Persistent memory** — SQLite + FTS5 for fast retrieval, human-readable markdown for auditability
+- **Project guidance** — scoped `AGENTS.md` / `CLAUDE.md` instructions and discoverable local skills
 - **Checkpoint system** — auto-snapshot at 80% context window; resume mid-task without truncation
 - **Goal/judge verification** — set a stop condition, verified by independent model
 - **Dream/Distill** — session trace distillation into long-term memory and reusable agents
@@ -50,30 +53,22 @@ Signhify CLI is an AI-native developer tooling platform that that plans, writes,
 
 ## Quick Install
 
-### via npm (global)
+### Universal Single Command (macOS, Linux, Windows)
 
 ```bash
 npm install -g @signhify/cli
-signhify --help
 ```
 
-### via npm (run on demand)
+### Zero-Install Run (All OS)
 
 ```bash
-npx signhify run "explain this codebase" --mode plan
+npx @signhify/cli
 ```
 
-### via PowerShell (Windows)
+### Alternative Platform Shell Scripts
 
-```powershell
-irm https://signhify-cli.vercel.app/install.ps1 | iex
-```
-
-### via curl (macOS / Linux)
-
-```bash
-curl -fsSL https://signhify-cli.vercel.app/install.sh | bash
-```
+- **Windows (PowerShell):** `irm https://signhify-cli.vercel.app/install.ps1 | iex`
+- **macOS / Linux (bash):** `curl -fsSL https://signhify-cli.vercel.app/install.sh | bash`
 
 ## Getting Started
 
@@ -100,20 +95,26 @@ signhify --help
 |---|---|
 | `signhify` | Interactive TUI (default) |
 | `signhify run <task>` | Execute a task non-interactively |
+| `signhify resume <id>` | Resume a previous session by ID |
+| `signhify sessions` | List recorded sessions with checkpoint stats (`--json` supported) |
 | `signhify wizard` | First-run setup wizard |
 | `--mode <mode>` | Agent mode (build/plan/debug/compose) |
 | `--auto` | Automatic mode (no confirmation prompts) |
 | `--output json` | Structured JSON output for CI/CD |
 | `--goal <goal>` | Stop condition (e.g., "all tests pass") |
+| `--resume <id>` | Resume a specific prior session |
 
 ### Slash Commands (in TUI)
 
 | Command | Description |
 |---|---|
 | `/goal <goal>` | Set a stop condition |
+| `/sessions` | List recent sessions with checkpoint counters |
+| `/fork [title]` | Branch active session into an isolated checkpoint line |
 | `/dream` | Distill session into MEMORY.md |
 | `/distill <name>` | Create a reusable agent from this session |
 | `Tab` | Cycle through agent modes |
+| `Esc` | Abort in-flight streaming, subagents, and spawned processes |
 
 ## Development
 
@@ -151,7 +152,7 @@ See the [JSON Schema](signhify.config.schema.json) for full options.
                     ┌──────────────────────────────┐
                     │   CLI (Ink TUI) / VS Code Ext │
                     └──────────┬───────────────────┘
-                               │ JSON-RPC
+                               │ direct shared TypeScript API
                     ┌──────────▼───────────────────┐
                     │     @signhify/core            │
                     │  AgentLoop, Modes, Permissions │
@@ -178,14 +179,15 @@ See the [JSON Schema](signhify.config.schema.json) for full options.
 | v0.2 | Multi-provider, BYO keys, memory system | ✅ |
 | v0.3 | `--auto` mode, goal/judge, JSON output, CI-safe permissions | ✅ |
 | v0.4 | VS Code extension (chat + inline autocomplete) | ✅ |
-| v0.5 | Subagents, MCP client, Compose mode | 🔄 |
-| v1.0 | Dream/Distill, marketplace, stable release | 🔄 |
+| v0.5 | Subagents, MCP stdio client, Compose mode, Dream/Distill | ✅ |
+| v1.0 | Stable release, closed-loop verification, VS Code .vsix distribution | 🔄 |
 
 ## Community
 
 - [GitHub Issues](https://github.com/Warriorlegacy/Signhify_CLI/issues) — bug reports, feature requests
 - [GitHub Discussions](https://github.com/Warriorlegacy/Signhify_CLI/discussions) — questions, ideas
 - [Contributing Guide](CONTRIBUTING.md) — how to contribute
+- [MCP setup](site/docs/mcp.md) — stdio server setup, consent, and current transport support
 - [Code of Conduct](CODE_OF_CONDUCT.md) — community standards
 
 ## Packages on npm
@@ -194,9 +196,11 @@ See the [JSON Schema](signhify.config.schema.json) for full options.
 |---|---|---|
 | [`@signhify/core`](https://www.npmjs.com/package/@signhify/core) | [![npm](https://img.shields.io/npm/v/@signhify/core)](https://www.npmjs.com/package/@signhify/core) | Agent loop, modes, permissions, context management |
 | [`@signhify/providers`](https://www.npmjs.com/package/@signhify/providers) | [![npm](https://img.shields.io/npm/v/@signhify/providers)](https://www.npmjs.com/package/@signhify/providers) | OpenAI, Anthropic, Gemini, OpenAI-compatible adapters |
-| [`@signhify/tools`](https://www.npmjs.com/package/@signhify/tools) | [![npm](https://img.shields.io/npm/v/@signhify/tools)](https://www.npmjs.com/package/@signhify/tools) | File I/O, shell, git, search, browser, MCP client |
-| [`@signhify/memory`](https://www.npmjs.com/package/@signhify/memory) | [![npm](https://img.shields.io/npm/v/@signhify/memory)](https://www.npmjs.com/package/@signhify/memory) | SQLite+FTS5, checkpoints, dream/distill engine |
-| [`@signhify/cli`](https://www.npmjs.com/package/@signhify/cli) | [![npm](https://img.shields.io/npm/v/@signhify/cli)](https://www.npmjs.com/package/@signhify/cli) | Terminal TUI (Ink) + non-interactive runner |
+| [`@signhify/tools`](https://www.npmjs.com/package/@signhify/tools) | [![npm](https://img.shields.io/npm/v/@signhify/tools)](https://www.npmjs.com/package/@signhify/tools) | File I/O, diff preview, shell, git, search, browser, MCP client |
+| [`@signhify/memory`](https://www.npmjs.com/package/@signhify/memory) | [![npm](https://img.shields.io/npm/v/@signhify/memory)](https://www.npmjs.com/package/@signhify/memory) | SQLite+FTS5 query sanitization, checkpoints, session fork/resume |
+| [`@signhify/agents`](https://www.npmjs.com/package/@signhify/agents) | [![npm](https://img.shields.io/npm/v/@signhify/agents)](https://www.npmjs.com/package/@signhify/agents) | Swarm orchestrator, specialized @editor, @reviewer, @planner |
+| [`@signhify/cli`](https://www.npmjs.com/package/@signhify/cli) | [![npm](https://img.shields.io/npm/v/@signhify/cli)](https://www.npmjs.com/package/@signhify/cli) | Terminal TUI (Ink) + tok/s meter + non-interactive runner |
+| [`signhify-vscode`](packages/vscode-ext) | `0.3.1` | VS Code extension (SecretStorage, inline completion, chat panel) |
 
 ## Security
 
