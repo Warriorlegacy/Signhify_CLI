@@ -1211,7 +1211,7 @@
           </svg>
         </div>
         <span>Signhify CLI</span>
-        <span class="brand-badge">v0.3.1</span>
+        <span class="brand-badge">v0.3.2</span>
       </a>
 
       <div class="nav-links">
@@ -1480,15 +1480,15 @@
                 <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
               </svg>
             </div>
-            <h3>Local-First Provider Routing</h3>
+            <h3>Multi-Provider BYOK &amp; Transparent Fallback</h3>
             <p>
-              Zero-latency priority for local endpoints (9router, Ollama, Antseed, vLLM). When rate limits (HTTP 429) occur, an in-memory circuit breaker instantly cascades to configured BYOK cloud models without dropping conversation state.
+              Bring your own keys across Anthropic (Claude 3.5 Sonnet), OpenAI (GPT-4o, o1), Gemini 1.5 Pro, Groq, DeepSeek (V3, R1), OpenRouter, Mistral, and local Ollama. An in-memory circuit breaker executes zero-token-loss failover on 429 rate limits, context overflows, or upstream outages.
             </p>
           </div>
           <div class="card-footer-tags">
-            <span class="mono-badge emerald">CIRCUIT BREAKER</span>
-            <span class="mono-badge">MULTI-ENDPOINT</span>
-            <span class="mono-badge">OFFLINE-FIRST</span>
+            <span class="mono-badge emerald">BYOK MULTI-PROVIDER</span>
+            <span class="mono-badge">TRANSPARENT FAILOVER</span>
+            <span class="mono-badge">CIRCUIT BREAKER</span>
           </div>
         </div>
 
@@ -1893,11 +1893,11 @@
           <div class="arch-layers">
             <div class="layer-item">
               <div class="layer-title">
-                <span>1. Provider Cascades &amp; Circuit Breakers</span>
+                <span>1. Multi-Provider BYOK &amp; Resilient Fallback Engine</span>
                 <span class="mono-badge cyan" style="font-size:10px;">packages/providers</span>
               </div>
               <div class="layer-desc">
-                Adapters interface with local endpoints (9router, Ollama) and remote APIs (Gemini, Anthropic, OpenAI). Dynamic circuit breakers track error rates and HTTP 429 statuses, seamlessly cascading to the next provider without dropping active context.
+                Unified adapter layer spanning Anthropic, OpenAI, Google Gemini, Groq, DeepSeek, OpenRouter, Mistral, and local Ollama. Dynamic FallbackRouter triggers instant failover on HTTP 429 rate limits, context overflows, or 5xx outages while preserving conversation history and tool execution tokens.
               </div>
             </div>
 
@@ -1948,9 +1948,9 @@
                 </svg>
               </div>
               <div class="sec-content">
-                <h4>100% Zero Telemetry Guarantee</h4>
+                <h4>Zero-Leak Credential Isolation</h4>
                 <p>
-                  Signhify CLI contains zero analytics trackers, zero usage pings, and zero prompt-logging network calls. Your source code and prompts never leave your configured provider boundaries.
+                  Plaintext API keys are never written to disk, telemetry traces, or session checkpoint databases. Keys are masked in console output and migrated automatically into native OS keychains (macOS Keychain, Windows Credential Manager, Linux Secret Service).
                 </p>
               </div>
             </div>
@@ -1963,9 +1963,9 @@
                 </svg>
               </div>
               <div class="sec-content">
-                <h4>Native OS Credential Keychain</h4>
+                <h4>100% Zero-Telemetry &amp; Sovereign Data</h4>
                 <p>
-                  API keys entered interactively are protected in your operating system's native secure credential vault (Windows Credential Manager, macOS Keychain, Linux Secret Service), or referenced via explicit environment variables.
+                  Signhify CLI contains zero analytics trackers, zero usage beacons, and zero prompt logging. Local execution (Ollama, vLLM, LM Studio) operates entirely air-gapped with no outbound network traffic.
                 </p>
               </div>
             </div>

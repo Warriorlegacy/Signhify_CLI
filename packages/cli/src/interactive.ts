@@ -3,7 +3,7 @@ import { render, Box, Text, useInput, useApp } from "ink";
 import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
 import { SignhifyConfig, AgentLoop, Goal, TaskNode, loadProjectInstructions } from "@signhify/core";
-import { saveConfig, resolveApiKeyRef } from "./config.js";
+import { saveConfig, resolveApiKeyRef, resolveApiKey } from "./config.js";
 import {
   buildSidebarSections,
   type SidebarState,
@@ -20,6 +20,7 @@ import {
   FallbackRouter,
   FallbackEvent,
   DEFAULT_ZERO_COST_CHAIN,
+  maskApiKey,
 } from "@signhify/providers";
 import {
   MemoryMdManager,
@@ -63,7 +64,9 @@ const PALETTE_COMMANDS: PaletteCommand[] = [
   { name: "/mode", description: "build | plan | debug | compose" },
   { name: "/context-limit", description: "set the context token budget" },
   { name: "/usage", description: "show session token usage" },
-  { name: "/models", description: "show configured providers" },
+  { name: "/provider", description: "show active provider and masked credentials" },
+  { name: "/models", description: "show configured providers and fallback chain" },
+  { name: "/config", description: "show configuration and masked credentials" },
   { name: "/history", description: "search checkpoint history" },
   { name: "/sidebar", description: "toggle sidebar (or collapse <id>)" },
   { name: "/goal", description: "set the stop condition" },
@@ -213,11 +216,21 @@ function ChatApp({
         endpoints: fallbackChain as import("@signhify/providers").EndpointConfig[],
         onFallback: (event: FallbackEvent) => {
           setActiveRouterInfo(`${event.toEndpoint} (fallback)`);
+          const reasonText =
+            event.reason === "rate_limit"
+              ? "Provider rate limit reached"
+              : event.reason === "auth"
+                ? "Provider authentication failed"
+                : event.reason === "unavailable"
+                  ? "Provider service unavailable"
+                  : event.reason === "timeout"
+                    ? "Provider request timed out"
+                    : `Provider error (${event.reason})`;
           setMessages((prev) => [
             ...prev,
             {
               role: "system",
-              content: `[Fallback] ${event.fromEndpoint} -> ${event.toEndpoint} (${event.reason})`,
+              content: `⚡ ${reasonText} on ${event.fromEndpoint}: falling back to ${event.toEndpoint}`,
             },
           ]);
         },
@@ -419,7 +432,35 @@ function ChatApp({
           setInput("");
           return;
         }
+        if (cmd === "/provider") {
+          const agentKey =
+            config.provider.agent.apiKey ??
+            (await resolveApiKey({
+              vendor: config.provider.agent.vendor,
+              apiKeyRef: config.provider.agent.apiKeyRef,
+            }));
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "system",
+              content: [
+                `Active Provider: ${config.provider.agent.vendor}`,
+                `Model: ${config.provider.agent.model}`,
+                `API Key: ${maskApiKey(agentKey)}`,
+                `Key Reference: ${config.provider.agent.apiKeyRef ?? "<none>"}`,
+              ].join("\n"),
+            },
+          ]);
+          setInput("");
+          return;
+        }
         if (cmd === "/models") {
+          const agentKey =
+            config.provider.agent.apiKey ??
+            (await resolveApiKey({
+              vendor: config.provider.agent.vendor,
+              apiKeyRef: config.provider.agent.apiKeyRef,
+            }));
           const chain =
             config.provider.fallbackChain && config.provider.fallbackChain.length > 0
               ? config.provider.fallbackChain
@@ -429,11 +470,39 @@ function ChatApp({
             {
               role: "system",
               content: [
-                `Agent endpoint: ${config.provider.agent.vendor}/${config.provider.agent.model}`,
+                `Agent endpoint: ${config.provider.agent.vendor}/${config.provider.agent.model} [key: ${maskApiKey(agentKey)}]`,
                 "Fallback chain (highest priority first):",
-                ...(chain as Array<{ name: string; vendor: string; model: string; isLocal?: boolean }>).map(
-                  (ep) => `- ${ep.name}: ${ep.vendor}/${ep.model}${ep.isLocal ? " (local)" : ""}`,
+                ...(chain as Array<{ name: string; vendor: string; model: string; isLocal?: boolean; apiKey?: string; apiKeyRef?: string }>).map(
+                  (ep) => {
+                    const epKey = maskApiKey(ep.apiKey ?? ep.apiKeyRef);
+                    return `- ${ep.name}: ${ep.vendor}/${ep.model}${ep.isLocal ? " (local)" : ""} [key: ${epKey}]`;
+                  },
                 ),
+              ].join("\n"),
+            },
+          ]);
+          setInput("");
+          return;
+        }
+        if (cmd === "/config") {
+          const agentKey =
+            config.provider.agent.apiKey ??
+            (await resolveApiKey({
+              vendor: config.provider.agent.vendor,
+              apiKeyRef: config.provider.agent.apiKeyRef,
+            }));
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "system",
+              content: [
+                "Configuration summary:",
+                `- Provider: ${config.provider.agent.vendor}`,
+                `- Model: ${config.provider.agent.model}`,
+                `- API Key: ${maskApiKey(agentKey)}`,
+                `- Key Reference: ${config.provider.agent.apiKeyRef ?? "<none>"}`,
+                `- Context Limit: ${config.memory?.contextLimit ?? 128000}`,
+                `- Fallback Chain Endpoints: ${(config.provider.fallbackChain ?? []).length}`,
               ].join("\n"),
             },
           ]);

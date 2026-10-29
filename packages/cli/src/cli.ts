@@ -20,9 +20,17 @@ export function buildCli(yargsInstance = yargs()) {
   return yargsInstance
     .scriptName('signhify')
     .command('$0', 'Start interactive Signhify session', (yargs) => {
-      return yargs.option('resume', { type: 'string', describe: 'Resume a session by ID' });
+      return yargs
+        .option('resume', { type: 'string', describe: 'Resume a session by ID' })
+        .option('provider', { type: 'string', describe: 'Active LLM provider vendor (anthropic, openai, gemini, groq, etc.)' })
+        .option('api-key', { type: 'string', describe: 'API key for the active provider' })
+        .option('model', { type: 'string', describe: 'Model name/ID' });
     }, async (argv) => {
-      const config = await loadConfig();
+      const config = await loadConfig({
+        cliApiKey: (argv['api-key'] || argv.apiKey) as string | undefined,
+        cliProvider: argv.provider as string | undefined,
+        cliModel: argv.model as string | undefined,
+      });
       await runInteractive(config, { resume: argv.resume as string | undefined });
     })
     .command('resume [sessionId]', 'Resume an existing session in interactive mode', (yargs) => {
@@ -71,9 +79,16 @@ export function buildCli(yargsInstance = yargs()) {
         .option('auto', { type: 'boolean', default: false, alias: 'yes', describe: 'Suppress all confirmation prompts' })
         .option('output', { type: 'string', choices: ['json', 'text'] as const, default: 'text', describe: 'Output format' })
         .option('mode', { type: 'string', default: 'build', describe: 'Agent mode' })
-        .option('resume', { type: 'string', describe: 'Resume a registered session id: loads its newest checkpoint as context' });
+        .option('resume', { type: 'string', describe: 'Resume a registered session id: loads its newest checkpoint as context' })
+        .option('provider', { type: 'string', describe: 'Active LLM provider vendor' })
+        .option('api-key', { type: 'string', describe: 'API key for the active provider' })
+        .option('model', { type: 'string', describe: 'Model name/ID' });
     }, async (argv) => {
-      const config = await loadConfig();
+      const config = await loadConfig({
+        cliApiKey: (argv['api-key'] || argv.apiKey) as string | undefined,
+        cliProvider: argv.provider as string | undefined,
+        cliModel: argv.model as string | undefined,
+      });
       if (!argv.task && argv.resume) {
         await runInteractive(config, { resume: argv.resume as string });
         return;
@@ -100,7 +115,7 @@ export function buildCli(yargsInstance = yargs()) {
       if (!argv.stdio) throw new Error('The local session host currently requires --stdio');
       await runStdioServer();
     })
-    .command('wizard', 'Run first-run setup wizard', () => {}, async () => {
+    .command(['wizard', 'configure'], 'Run first-run setup wizard or configure provider settings', () => {}, async () => {
       await runSetupWizard();
     })
     .help();

@@ -12,14 +12,129 @@ export interface ProviderFactoryConfig {
 }
 
 /**
+ * Sanitizes an API key string by trimming whitespace, enclosing quotes,
+ * and stripping any leading "Bearer " token prefix.
+ */
+export function sanitizeApiKey(key: string | undefined): string | undefined {
+  if (!key) return undefined;
+  let trimmed = key.trim().replace(/^['"]+|['"]+$/g, '');
+  if (/^bearer\s+/i.test(trimmed)) {
+    trimmed = trimmed.replace(/^bearer\s+/i, '').trim();
+  }
+  trimmed = trimmed.replace(/^['"]+|['"]+$/g, '').trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/**
+ * Masks an API key for safe logging, diagnostics, and display (never logs full credentials).
+ */
+export function maskApiKey(key?: string): string {
+  if (!key) return '<none>';
+  const clean = sanitizeApiKey(key) ?? '';
+  if (clean.length === 0) return '<none>';
+  if (clean.length <= 8) return '***';
+  if (clean.startsWith('sk-')) {
+    const suffix = clean.slice(-4);
+    return `sk-...${suffix}`;
+  }
+  const prefix = clean.slice(0, 4);
+  const suffix = clean.slice(-4);
+  return `${prefix}...${suffix}`;
+}
+
+const VENDOR_ENV_MAP: Record<string, string[]> = {
+  openai: ['OPENAI_API_KEY'],
+  anthropic: ['ANTHROPIC_API_KEY'],
+  claude: ['ANTHROPIC_API_KEY', 'CLAUDE_API_KEY'],
+  google: ['GOOGLE_GENERATIVE_AI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY'],
+  gemini: ['GEMINI_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'GOOGLE_API_KEY'],
+  deepseek: ['DEEPSEEK_API_KEY'],
+  openrouter: ['OPENROUTER_API_KEY'],
+  ollama: ['OLLAMA_API_KEY'],
+  mistral: ['MISTRAL_API_KEY'],
+  groq: ['GROQ_API_KEY'],
+  xai: ['XAI_API_KEY'],
+  grok: ['XAI_API_KEY', 'GROK_API_KEY'],
+  togetherai: ['TOGETHER_API_KEY', 'TOGETHERAI_API_KEY'],
+  together: ['TOGETHER_API_KEY', 'TOGETHERAI_API_KEY'],
+  perplexity: ['PERPLEXITY_API_KEY'],
+  deepinfra: ['DEEPINFRA_API_KEY'],
+  fireworks: ['FIREWORKS_API_KEY'],
+  cohere: ['COHERE_API_KEY'],
+  cerebras: ['CEREBRAS_API_KEY'],
+  alibaba: ['ALIBABA_API_KEY'],
+  qwen: ['ALIBABA_API_KEY', 'QWEN_API_KEY'],
+  azure: ['AZURE_API_KEY'],
+};
+
+/**
  * Single apiKeyRef resolution point: env: ref → environment variable,
  * otherwise the ref is a literal key. Explicit apiKey still wins.
+ * Checks SIGNHIFY_<VENDOR>_API_KEY before <VENDOR>_API_KEY.
+ * All resolved keys are sanitized.
  */
 export function resolveProviderKey(config: ProviderFactoryConfig): string | undefined {
-  if (config.apiKey) return config.apiKey;
+  if (config.apiKey) {
+    const sanitized = sanitizeApiKey(config.apiKey);
+    if (sanitized) return sanitized;
+  }
+
+  if (config.apiKeyEnv) {
+    const envVar = config.apiKeyEnv;
+    const signhifyVar = envVar.startsWith('SIGNHIFY_') ? envVar : `SIGNHIFY_${envVar}`;
+    const signhifyVal = process.env[signhifyVar];
+    if (signhifyVal) {
+      const sanitized = sanitizeApiKey(signhifyVal);
+      if (sanitized) return sanitized;
+    }
+    const val = process.env[envVar];
+    if (val) {
+      const sanitized = sanitizeApiKey(val);
+      if (sanitized) return sanitized;
+    }
+  }
+
   const ref = config.apiKeyRef;
-  if (ref?.startsWith("env:")) return process.env[ref.slice(4)] || undefined;
-  return ref && !ref.startsWith("keytar:") ? ref : undefined;
+  if (ref?.startsWith('env:')) {
+    const envVar = ref.slice(4);
+    const signhifyVar = envVar.startsWith('SIGNHIFY_') ? envVar : `SIGNHIFY_${envVar}`;
+    const signhifyVal = process.env[signhifyVar];
+    if (signhifyVal) {
+      const sanitized = sanitizeApiKey(signhifyVal);
+      if (sanitized) return sanitized;
+    }
+    const val = process.env[envVar];
+    if (val) {
+      const sanitized = sanitizeApiKey(val);
+      if (sanitized) return sanitized;
+    }
+  } else if (ref && !ref.startsWith('keytar:')) {
+    const sanitized = sanitizeApiKey(ref);
+    if (sanitized) return sanitized;
+  }
+
+  if (config.vendor) {
+    const norm = config.vendor.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const rawUpper = config.vendor.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+    const knownVars = VENDOR_ENV_MAP[norm] ?? [];
+    const envVars = [...new Set([...knownVars, `${rawUpper}_API_KEY`])];
+
+    for (const v of envVars) {
+      const signhifyVar = v.startsWith('SIGNHIFY_') ? v : `SIGNHIFY_${v}`;
+      const signhifyVal = process.env[signhifyVar];
+      if (signhifyVal) {
+        const sanitized = sanitizeApiKey(signhifyVal);
+        if (sanitized) return sanitized;
+      }
+      const val = process.env[v];
+      if (val) {
+        const sanitized = sanitizeApiKey(val);
+        if (sanitized) return sanitized;
+      }
+    }
+  }
+
+  return undefined;
 }
 
 type ModelLoader = (modelId: string) => LanguageModel;
@@ -150,14 +265,36 @@ async function loadGateway(config: ProviderFactoryConfig): Promise<ModelLoader> 
   return (modelId: string) => provider.languageModel(modelId) as unknown as LanguageModel;
 }
 
+async function loadDeepSeek(config: ProviderFactoryConfig): Promise<ModelLoader> {
+  const { createDeepSeek } = await import('@ai-sdk/deepseek');
+  const apiKey = resolveProviderKey(config) ?? process.env.SIGNHIFY_DEEPSEEK_API_KEY ?? process.env.DEEPSEEK_API_KEY ?? '';
+  const provider = createDeepSeek({ apiKey: apiKey || undefined, baseURL: config.baseUrl });
+  return (modelId: string) => provider.languageModel(modelId) as unknown as LanguageModel;
+}
+
 async function loadOpenAICompatible(config: ProviderFactoryConfig): Promise<ModelLoader> {
   const { createOpenAICompatible } = await import('@ai-sdk/openai-compatible');
-  const baseURL = config.baseUrl ?? 'http://localhost:11434/v1';
-  const apiKey = config.apiKey ?? '';
+  let baseURL = config.baseUrl;
+  if (!baseURL) {
+    if (config.vendor === 'ollama') baseURL = 'http://localhost:11434/v1';
+    else if (config.vendor === 'openrouter') baseURL = 'https://openrouter.ai/api/v1';
+    else baseURL = 'http://localhost:11434/v1';
+  }
+  const apiKey = resolveProviderKey(config)
+    ?? (config.vendor === 'openrouter' ? (process.env.SIGNHIFY_OPENROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY) : undefined)
+    ?? (config.vendor === 'ollama' ? 'ollama' : undefined)
+    ?? process.env.SIGNHIFY_OPENAI_COMPATIBLE_API_KEY
+    ?? process.env.OPENAI_COMPATIBLE_API_KEY
+    ?? process.env.OPENAI_API_KEY
+    ?? (config.vendor === 'ollama' ? 'ollama' : '');
   const provider = createOpenAICompatible({
-    name: 'openai-compatible',
+    name: config.vendor || 'openai-compatible',
     baseURL,
     apiKey: apiKey || undefined,
+    headers: config.vendor === 'openrouter' ? {
+      'HTTP-Referer': 'https://signhify.dev',
+      'X-Title': 'Signhify CLI',
+    } : undefined,
   });
   return (modelId: string) => provider.languageModel(modelId) as unknown as LanguageModel;
 }
@@ -171,6 +308,9 @@ const vendors: VendorDef[] = [
   { match: ['openai'], loader: loadOpenAI },
   { match: ['anthropic', 'claude'], loader: loadAnthropic },
   { match: ['google', 'gemini'], loader: loadGoogle },
+  { match: ['deepseek'], loader: loadDeepSeek },
+  { match: ['ollama'], loader: loadOpenAICompatible },
+  { match: ['openrouter'], loader: loadOpenAICompatible },
   { match: ['amazon-bedrock', 'bedrock'], loader: loadAmazonBedrock },
   { match: ['azure'], loader: loadAzure },
   { match: ['google-vertex', 'vertex'], loader: loadGoogleVertex },
@@ -201,7 +341,7 @@ export async function createAdapter(config: ProviderFactoryConfig): Promise<Mode
     return createMockAdapter({ vendor });
   }
 
-  const apiKey = config.apiKey ?? (config.apiKeyEnv ? process.env[config.apiKeyEnv] : undefined) ?? '';
+  const apiKey = resolveProviderKey(config) ?? '';
 
   for (const def of vendors) {
     if (def.match.includes(vendor)) {

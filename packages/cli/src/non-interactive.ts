@@ -100,7 +100,17 @@ export async function runNonInteractive(
         endpoints: fallbackChain as import("@signhify/providers").EndpointConfig[],
         onFallback: (event: FallbackEvent) => {
           // stdout carries JSON only; diagnostics go to stderr.
-          console.error(`[Fallback] ${event.fromEndpoint} -> ${event.toEndpoint} (${event.reason})`);
+          const reasonText =
+            event.reason === "rate_limit"
+              ? "Provider rate limit reached"
+              : event.reason === "auth"
+                ? "Provider authentication failed"
+                : event.reason === "unavailable"
+                  ? "Provider service unavailable"
+                  : event.reason === "timeout"
+                    ? "Provider request timed out"
+                    : `Provider error (${event.reason})`;
+          console.error(`⚡ ${reasonText} on ${event.fromEndpoint}: falling back to ${event.toEndpoint}`);
         },
       });
     }

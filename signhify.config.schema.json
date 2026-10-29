@@ -97,7 +97,7 @@
       "properties": {
         "vendor": {
           "type": "string",
-          "enum": ["anthropic", "google", "openai", "openai-compatible", "groq", "xai", "mistral", "cerebras", "togetherai", "perplexity", "mock"],
+          "enum": ["anthropic", "google", "openai", "openai-compatible", "groq", "deepseek", "openrouter", "ollama", "xai", "mistral", "cerebras", "togetherai", "perplexity", "deepinfra", "fireworks", "cohere", "alibaba", "amazon-bedrock", "azure", "google-vertex", "gateway", "mock"],
           "description": "Model vendor identifier."
         },
         "model": {

@@ -2,7 +2,7 @@
   "name": "signhify",
   "displayName": "Signhify — AI Engineering Agent",
   "description": "Your AI engineering partner — in the terminal and in the IDE",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "publisher": "signhify",
   "repository": {
     "type": "git",
@@ -132,10 +132,10 @@
     "clean": "node -e \"const {rmSync,existsSync}=require('fs');['dist','*.tsbuildinfo'].forEach(p=>{if(existsSync(p))rmSync(p,{recursive:true,force:true})})\""
   },
   "dependencies": {
-    "@signhify/core": "*",
-    "@signhify/providers": "*",
-    "@signhify/tools": "*",
-    "@signhify/memory": "*"
+    "@signhify/core": "^0.3.2",
+    "@signhify/providers": "^0.3.2",
+    "@signhify/tools": "^0.3.2",
+    "@signhify/memory": "^0.3.2"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

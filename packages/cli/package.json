@@ -1,6 +1,6 @@
 {
   "name": "@signhify/cli",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Terminal frontend for the Signhify AI coding agent",
   "type": "module",
   "main": "dist/index.js",
@@ -14,10 +14,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@signhify/core": "*",
-    "@signhify/providers": "*",
-    "@signhify/tools": "*",
-    "@signhify/memory": "*",
+    "@signhify/core": "^0.3.2",
+    "@signhify/providers": "^0.3.2",
+    "@signhify/tools": "^0.3.2",
+    "@signhify/memory": "^0.3.2",
     "ink": "^5",
     "ink-text-input": "^6",
     "ink-spinner": "^5",

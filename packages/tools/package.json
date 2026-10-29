@@ -1,6 +1,6 @@
 {
   "name": "@signhify/tools",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Tool handlers for the Signhify agent loop",
   "type": "module",
   "main": "dist/index.js",
@@ -18,8 +18,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@signhify/core": "*",
-    "@signhify/agents": "*",
+    "@signhify/core": "^0.3.2",
+    "@signhify/agents": "^0.3.2",
     "simple-git": "^3.27.0"
   },
   "devDependencies": {

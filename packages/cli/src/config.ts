@@ -6,6 +6,11 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import type { SignhifyConfig } from "@signhify/core";
+import {
+  validateProviderApiKey,
+  maskApiKey,
+  sanitizeApiKey,
+} from "@signhify/providers";
 
 interface KeytarModule {
   setPassword(service: string, account: string, password: string): Promise<void>;
@@ -178,6 +183,234 @@ function migrateLegacyApiKey(config: SignhifyConfig): SignhifyConfig {
   return config;
 }
 
+export function parseEnvFile(content: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  const lines = content.split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const cleanLine = trimmed.startsWith("export ") ? trimmed.slice(7).trim() : trimmed;
+    const eqIdx = cleanLine.indexOf("=");
+    if (eqIdx === -1) continue;
+    const key = cleanLine.slice(0, eqIdx).trim();
+    let val = cleanLine.slice(eqIdx + 1).trim();
+    if (
+      (val.startsWith('"') && val.endsWith('"')) ||
+      (val.startsWith("'") && val.endsWith("'"))
+    ) {
+      val = val.slice(1, -1);
+    }
+    if (key) {
+      result[key] = val;
+    }
+  }
+  return result;
+}
+
+export async function loadEnvFile(dir: string): Promise<Record<string, string>> {
+  try {
+    const envPath = path.join(dir, ".env");
+    const content = await fs.readFile(envPath, "utf-8");
+    return parseEnvFile(content);
+  } catch {
+    return {};
+  }
+}
+
+export function getProviderEnvVarNames(vendor: string): string[] {
+  const normalized = vendor.toLowerCase().replace(/[^a-z0-9]/g, "_");
+  const upper = normalized.toUpperCase();
+  const names: string[] = [
+    `SIGNHIFY_${upper}_API_KEY`,
+    `${upper}_API_KEY`,
+  ];
+  if (["google", "gemini"].includes(normalized)) {
+    names.push(
+      "SIGNHIFY_GOOGLE_API_KEY",
+      "GOOGLE_API_KEY",
+      "SIGNHIFY_GEMINI_API_KEY",
+      "GEMINI_API_KEY",
+      "GOOGLE_GENERATIVE_AI_API_KEY",
+    );
+  } else if (["anthropic", "claude"].includes(normalized)) {
+    names.push(
+      "SIGNHIFY_ANTHROPIC_API_KEY",
+      "ANTHROPIC_API_KEY",
+      "SIGNHIFY_CLAUDE_API_KEY",
+      "CLAUDE_API_KEY",
+    );
+  } else if (["openai"].includes(normalized)) {
+    names.push("SIGNHIFY_OPENAI_API_KEY", "OPENAI_API_KEY");
+  } else if (["groq"].includes(normalized)) {
+    names.push("SIGNHIFY_GROQ_API_KEY", "GROQ_API_KEY");
+  } else if (["deepseek"].includes(normalized)) {
+    names.push("SIGNHIFY_DEEPSEEK_API_KEY", "DEEPSEEK_API_KEY");
+  } else if (["openrouter"].includes(normalized)) {
+    names.push("SIGNHIFY_OPENROUTER_API_KEY", "OPENROUTER_API_KEY");
+  } else if (["mistral"].includes(normalized)) {
+    names.push("SIGNHIFY_MISTRAL_API_KEY", "MISTRAL_API_KEY");
+  } else if (["xai", "grok"].includes(normalized)) {
+    names.push("SIGNHIFY_XAI_API_KEY", "XAI_API_KEY");
+  }
+  names.push("SIGNHIFY_API_KEY");
+  return [...new Set(names)];
+}
+
+export interface ResolveApiKeyOptions {
+  vendor: string;
+  cliApiKey?: string;
+  projectDir?: string;
+  apiKeyRef?: string;
+  env?: Record<string, string | undefined>;
+}
+
+/**
+ * Resolves an API key according to strict hierarchical precedence:
+ * 1. Explicit CLI flag (--api-key or opts.cliApiKey)
+ * 2. Workspace .signhify/config.json or .env
+ * 3. User global ~/.signhify/config.json (or ~/.config/signhify/config.json)
+ * 4. Environment variable: SIGNHIFY_<PROVIDER>_API_KEY, followed by <PROVIDER>_API_KEY
+ */
+export async function resolveApiKey(
+  vendorOrOptions: string | ResolveApiKeyOptions,
+  options?: Partial<ResolveApiKeyOptions>,
+): Promise<string | undefined> {
+  const opts: ResolveApiKeyOptions =
+    typeof vendorOrOptions === "string"
+      ? { vendor: vendorOrOptions, ...options }
+      : { ...vendorOrOptions, ...options };
+
+  const vendor = opts.vendor;
+  const projectDir = opts.projectDir ?? process.cwd();
+  const envMap = opts.env ?? process.env;
+
+  // 1. Explicit CLI flag (--api-key)
+  if (opts.cliApiKey) {
+    const sanitized = sanitizeApiKey(opts.cliApiKey);
+    if (sanitized) return sanitized;
+  }
+
+  // 2. Workspace .signhify/config.json or .env
+  const workspaceConfigPath = path.join(projectDir, ".signhify", "config.json");
+  const workspaceEnv = await loadEnvFile(projectDir);
+
+  // Check workspace .signhify/config.json
+  try {
+    const raw = await fs.readFile(workspaceConfigPath, "utf-8");
+    const workspaceConfig = JSON.parse(raw) as SignhifyConfig;
+    if (workspaceConfig?.provider?.agent) {
+      const agent = workspaceConfig.provider.agent;
+      if (!agent.vendor || agent.vendor === vendor) {
+        const ref = agent.apiKeyRef ?? (agent as { apiKey?: string }).apiKey;
+        if (ref) {
+          if (ref.startsWith("keytar:")) {
+            try {
+              const val = await resolveApiKeyRef(ref);
+              if (val) return sanitizeApiKey(val);
+            } catch {
+              // continue
+            }
+          } else if (ref.startsWith("env:")) {
+            const varName = ref.slice(4);
+            const fromEnv = workspaceEnv[varName] ?? envMap[varName];
+            if (fromEnv) {
+              return sanitizeApiKey(fromEnv);
+            }
+          } else {
+            return sanitizeApiKey(ref);
+          }
+        }
+      }
+    }
+  } catch {
+    // workspace config not present
+  }
+
+  // If apiKeyRef was explicitly passed from a workspace config
+  if (opts.apiKeyRef?.startsWith("env:")) {
+    const varName = opts.apiKeyRef.slice(4);
+    const fromEnv = workspaceEnv[varName] ?? envMap[varName];
+    if (fromEnv) {
+      return sanitizeApiKey(fromEnv);
+    }
+  }
+
+  // Check workspace .env for provider variables
+  const providerVars = getProviderEnvVarNames(vendor);
+  for (const varName of providerVars) {
+    if (workspaceEnv[varName]) {
+      const sanitized = sanitizeApiKey(workspaceEnv[varName]);
+      if (sanitized) return sanitized;
+    }
+  }
+
+  // 3. User global ~/.signhify/config.json or ~/.config/signhify/config.json
+  const home = os.homedir();
+  const globalPaths = [
+    path.join(home, ".signhify", "config.json"),
+    path.join(home, ".config", "signhify", "config.json"),
+  ];
+
+  for (const gPath of globalPaths) {
+    try {
+      const raw = await fs.readFile(gPath, "utf-8");
+      const gConfig = JSON.parse(raw) as SignhifyConfig;
+      if (gConfig?.provider?.agent) {
+        const agent = gConfig.provider.agent;
+        if (!agent.vendor || agent.vendor === vendor) {
+          const ref = agent.apiKeyRef ?? (agent as { apiKey?: string }).apiKey;
+          if (ref) {
+            if (ref.startsWith("keytar:")) {
+              try {
+                const val = await resolveApiKeyRef(ref);
+                if (val) return sanitizeApiKey(val);
+              } catch {
+                // ignore
+              }
+            } else if (ref.startsWith("env:")) {
+              const varName = ref.slice(4);
+              if (envMap[varName]) {
+                return sanitizeApiKey(envMap[varName]);
+              }
+            } else {
+              return sanitizeApiKey(ref);
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 4. Environment variable: SIGNHIFY_<PROVIDER>_API_KEY, followed by <PROVIDER>_API_KEY
+  for (const varName of providerVars) {
+    if (envMap[varName]) {
+      const sanitized = sanitizeApiKey(envMap[varName]);
+      if (sanitized) return sanitized;
+    }
+  }
+
+  if (opts.apiKeyRef?.startsWith("env:")) {
+    const varName = opts.apiKeyRef.slice(4);
+    if (envMap[varName]) {
+      const sanitized = sanitizeApiKey(envMap[varName]);
+      if (sanitized) return sanitized;
+    }
+  } else if (opts.apiKeyRef?.startsWith("keytar:")) {
+    try {
+      const val = await resolveApiKeyRef(opts.apiKeyRef);
+      if (val) return sanitizeApiKey(val);
+    } catch {
+      // ignore
+    }
+  } else if (opts.apiKeyRef) {
+    return sanitizeApiKey(opts.apiKeyRef);
+  }
+
+  return undefined;
+}
+
 /** Resolve an apiKeyRef: "env:NAME" | "keytar:service:account" | literal key. */
 export async function resolveApiKeyRef(ref: string | undefined): Promise<string | undefined> {
   if (ref === undefined) return undefined;
@@ -194,20 +427,108 @@ export async function resolveApiKeyRef(ref: string | undefined): Promise<string 
   return ref;
 }
 
-export async function loadConfig(projectDir?: string): Promise<SignhifyConfig> {
-  const dir = projectDir ?? process.cwd();
-  const projectConfigPath = path.join(dir, ".signhify", "config.json");
-  const projectConfig = await loadConfigFile(projectConfigPath);
-  if (projectConfig) return { ...DEFAULT_CONFIG, ...projectConfig } as SignhifyConfig;
-
-  const globalConfigPath = path.join(os.homedir(), ".config", "signhify", "config.json");
-  const globalConfig = await loadConfigFile(globalConfigPath);
-  if (globalConfig) return { ...DEFAULT_CONFIG, ...globalConfig } as SignhifyConfig;
-
-  return DEFAULT_CONFIG;
+export interface LoadConfigOptions {
+  cliApiKey?: string;
+  cliProvider?: string;
+  cliModel?: string;
+  projectDir?: string;
 }
 
-async function loadConfigFile(configPath: string): Promise<SignhifyConfig | undefined> {
+export async function loadConfig(
+  projectDirOrOptions?: string | LoadConfigOptions,
+  options?: LoadConfigOptions,
+): Promise<SignhifyConfig> {
+  const opts: LoadConfigOptions =
+    typeof projectDirOrOptions === "object" && projectDirOrOptions !== null
+      ? projectDirOrOptions
+      : options ?? {};
+  const dir =
+    (typeof projectDirOrOptions === "string" ? projectDirOrOptions : opts.projectDir) ??
+    process.cwd();
+
+  const projectConfigPath = path.join(dir, ".signhify", "config.json");
+  const projectConfig = await loadConfigFile(projectConfigPath, dir);
+
+  const home = os.homedir();
+  const globalConfigPaths = [
+    path.join(home, ".signhify", "config.json"),
+    path.join(home, ".config", "signhify", "config.json"),
+  ];
+
+  let config: SignhifyConfig | undefined;
+  if (projectConfig) {
+    config = { ...DEFAULT_CONFIG, ...projectConfig };
+  } else {
+    for (const gPath of globalConfigPaths) {
+      try {
+        const loaded = await loadConfigFile(gPath, dir);
+        if (loaded) {
+          config = { ...DEFAULT_CONFIG, ...loaded };
+          break;
+        }
+      } catch {
+        // Ignore invalid global config to avoid blocking CLI operations
+      }
+    }
+    if (!config) {
+      config = JSON.parse(JSON.stringify(DEFAULT_CONFIG)) as SignhifyConfig;
+    }
+  }
+
+  if (opts.cliProvider) {
+    config.provider.agent.vendor = opts.cliProvider;
+  }
+  if (opts.cliModel) {
+    config.provider.agent.model = opts.cliModel;
+  }
+
+  const vendor = config.provider.agent.vendor;
+  const resolvedKey = await resolveApiKey({
+    vendor,
+    cliApiKey: opts.cliApiKey,
+    projectDir: dir,
+    apiKeyRef: config.provider.agent.apiKeyRef,
+  });
+
+  config.provider.agent.apiKey = resolvedKey;
+
+  // Validate resolved API key
+  const isMock =
+    process.env.SIGNHIFY_MOCK_PROVIDER === "1" ||
+    process.env.SIGNHIFY_MOCK_PROVIDER === "true" ||
+    vendor === "mock" ||
+    vendor === "test";
+
+  if (!isMock) {
+    if (resolvedKey) {
+      const validation = validateProviderApiKey(vendor, resolvedKey);
+      if (!validation.valid && validation.error?.includes("placeholder")) {
+        throw new Error(
+          `Placeholder API key detected for provider "${vendor}" ("${maskApiKey(resolvedKey)}"). ` +
+          `Please set your actual API key in .signhify/config.json, .env, or run \`signhify configure\`.`
+        );
+      }
+      if (validation.warning && !process.env.VITEST) {
+        console.warn(`[Signhify] Key warning for ${vendor}: ${validation.warning}`);
+      }
+    } else {
+      const rawRef = config.provider.agent.apiKeyRef;
+      if (rawRef && !rawRef.startsWith("env:") && !rawRef.startsWith("keytar:")) {
+        const val = validateProviderApiKey(vendor, rawRef);
+        if (!val.valid && val.error?.includes("placeholder")) {
+          throw new Error(
+            `Placeholder API key detected for provider "${vendor}" ("${maskApiKey(rawRef)}"). ` +
+            `Please set your actual API key in .signhify/config.json, .env, or run \`signhify configure\`.`
+          );
+        }
+      }
+    }
+  }
+
+  return config;
+}
+
+async function loadConfigFile(configPath: string, projectDir?: string): Promise<SignhifyConfig | undefined> {
   let content: string;
   try {
     content = await fs.readFile(configPath, "utf-8");
@@ -223,7 +544,7 @@ async function loadConfigFile(configPath: string): Promise<SignhifyConfig | unde
   if (JSON.stringify(parsed) !== JSON.stringify(secured)) {
     await writeConfigFile(configPath, secured);
   }
-  return resolveAgentApiKey(secured);
+  return resolveAgentApiKey(secured, projectDir);
 }
 
 export async function saveConfig(config: SignhifyConfig, projectDir?: string): Promise<void> {
@@ -281,9 +602,14 @@ async function storeKeytarRefs(config: SignhifyConfig): Promise<SignhifyConfig> 
   };
 }
 
-async function resolveAgentApiKey(config: SignhifyConfig): Promise<SignhifyConfig> {
+async function resolveAgentApiKey(config: SignhifyConfig, projectDir?: string): Promise<SignhifyConfig> {
   delete config.provider?.agent?.apiKey;
-  const resolved = await resolveApiKeyRef(config.provider?.agent?.apiKeyRef);
+  const vendor = config.provider?.agent?.vendor ?? "openai";
+  const resolved = await resolveApiKey({
+    vendor,
+    apiKeyRef: config.provider?.agent?.apiKeyRef,
+    projectDir,
+  });
   return {
     ...config,
     provider: {
