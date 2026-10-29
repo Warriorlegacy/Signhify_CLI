@@ -125,7 +125,7 @@ export const subagentTool: ToolHandler = {
         });
       }
       const results = await orch.runPipeline(tasks, { invokeTool: context.invokeTool, signal: context.signal });
-      return JSON.stringify({ success: results.every((result) => result.success), results });
+      return JSON.stringify({ success: results.every((result: { success: boolean }) => result.success), results });
     }
 
     if (action === 'dispatch') {
