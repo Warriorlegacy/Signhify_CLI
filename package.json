@@ -11,7 +11,7 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "build": "npm run build:core && npm run build:providers && npm run build:agents && npm run build:memory && npm run build:tools && npm run build:web && npm run build:cli && npm run build:vscode",
+    "build": "npm run build:core && npm run build:providers && npm run build:memory && npm run build:agents && npm run build:tools && npm run build:web && npm run build:cli && npm run build:vscode",
     "build:core": "npm run build -w packages/core",
     "build:providers": "npm run build -w packages/providers",
     "build:agents": "npm run build -w packages/agents",

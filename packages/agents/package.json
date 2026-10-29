@@ -27,7 +27,7 @@
     "@signhify/providers": "^0.4.0"
   },
   "devDependencies": {
-    "@signhify/memory": "^0.2.0",
+    "@signhify/memory": "^0.4.0",
     "@types/node": "^20.11.0",
     "typescript": "^5.5.0",
     "vitest": "^2.0.0"
