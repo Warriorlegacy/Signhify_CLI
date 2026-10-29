@@ -85,3 +85,59 @@ describe('MemoryStore', () => {
     expect(store.search('p1', 'postgres database port').length).toBe(1);
   });
 });
+
+describe('MemoryStore.searchCheckpoints (/history)', () => {
+  let store: MemoryStore;
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'signhify-history-test-'));
+    store = new MemoryStore(path.join(tmpDir, 'test.db'));
+  });
+
+  afterEach(() => {
+    store.close();
+  });
+
+  it('finds checkpoints by summary content across sessions', () => {
+    const s1 = store.createSession(tmpDir);
+    const s2 = store.createSession(tmpDir);
+    store.saveCheckpoint(s1, 'Migrated the docker-compose setup to kubernetes manifests', 12_000);
+    store.saveCheckpoint(s2, 'Rewrote the vite.config.ts plugin ordering', 9_000);
+
+    const hits = store.searchCheckpoints('docker kubernetes', 10);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].sessionId).toBe(s1);
+    expect(hits[0].tokenUsageAtCheckpoint).toBe(12_000);
+    expect(hits[0].summary).toContain('kubernetes');
+  });
+
+  it('survives FTS5 operators and returns empty for token-free queries', () => {
+    const s = store.createSession(tmpDir);
+    store.saveCheckpoint(s, 'Fixed the flaky checkout test', 100);
+    for (const query of ['(flaky)', 'flaky* -checkout', '"checkout"', '!!! ??? ---']) {
+      expect(() => store.searchCheckpoints(query)).not.toThrow();
+    }
+    expect(store.searchCheckpoints('!!! ??? ---')).toEqual([]);
+  });
+
+  it('highlights matches in the snippet field', () => {
+    const s = store.createSession(tmpDir);
+    store.saveCheckpoint(s, 'Traced the login race through the auth middleware', 500);
+
+    const [hit] = store.searchCheckpoints('login', 10);
+    expect(hit).toBeDefined();
+    expect(hit!.snippet).toContain('[');
+  });
+
+  it('ranks the matching checkpoint above non-matching sessions when filtered', () => {
+    const s = store.createSession(tmpDir);
+    store.saveCheckpoint(s, 'Off-topic summary about CSS variables', 100);
+    expect(store.searchCheckpoints('kubernetes', 10)).toEqual([]);
+
+    // Session-scoped search narrows the space.
+    store.saveCheckpoint(s, 'Implemented kubernetes rollback', 200);
+    const scoped = store.searchCheckpoints('kubernetes', 10, s);
+    expect(scoped).toHaveLength(1);
+  });
+});

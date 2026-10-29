@@ -58,6 +58,9 @@ const PALETTE_COMMANDS: PaletteCommand[] = [
   { name: "/clear", description: "clear the conversation" },
   { name: "/mode", description: "build | plan | debug | compose" },
   { name: "/context-limit", description: "set the context token budget" },
+  { name: "/usage", description: "show session token usage" },
+  { name: "/models", description: "show configured providers" },
+  { name: "/history", description: "search checkpoint history" },
   { name: "/sidebar", description: "toggle sidebar (or collapse <id>)" },
   { name: "/goal", description: "set the stop condition" },
   { name: "/mcp", description: "show MCP server status" },
@@ -328,6 +331,68 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
             const newGoal: Goal = { statement: arg, maxIterations: 50 };
             setGoal(newGoal);
             setMessages((prev) => [...prev, { role: "system", content: `Goal set: "${arg}"` }]);
+          }
+          setInput("");
+          return;
+        }
+        if (cmd === "/usage") {
+          const pct = (tokenUsage.used / tokenUsage.limit) * 100;
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "system",
+              content:
+                `Session usage: ${tokenUsage.used.toLocaleString()} / ${tokenUsage.limit.toLocaleString()} tokens ` +
+                `(${pct.toFixed(1)}%). Endpoint: ${activeRouterInfo}. Mode: ${mode}.`,
+            },
+          ]);
+          setInput("");
+          return;
+        }
+        if (cmd === "/models") {
+          const chain =
+            config.provider.fallbackChain && config.provider.fallbackChain.length > 0
+              ? config.provider.fallbackChain
+              : DEFAULT_ZERO_COST_CHAIN;
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "system",
+              content: [
+                `Agent endpoint: ${config.provider.agent.vendor}/${config.provider.agent.model}`,
+                "Fallback chain (highest priority first):",
+                ...(chain as Array<{ name: string; vendor: string; model: string; isLocal?: boolean }>).map(
+                  (ep) => `- ${ep.name}: ${ep.vendor}/${ep.model}${ep.isLocal ? " (local)" : ""}`,
+                ),
+              ].join("\n"),
+            },
+          ]);
+          setInput("");
+          return;
+        }
+        if (cmd === "/history") {
+          if (!arg) {
+            setMessages((prev) => [
+              ...prev,
+              { role: "system", content: "Usage: /history <query> — search checkpoint summaries" },
+            ]);
+          } else {
+            const hits = memoryStore.searchCheckpoints(arg, 10);
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: "system",
+                content:
+                  hits.length === 0
+                    ? `No checkpoint matches for "${arg}".`
+                    : `Checkpoint history for "${arg}":\n${hits
+                        .map((h) => {
+                          const text = h.snippet || h.summary;
+                          return `• [${h.sessionId}] ${h.createdAt ?? ""} — ${text.length > 200 ? `${text.slice(0, 200)}…` : text}`;
+                        })
+                        .join("\n")}`,
+              },
+            ]);
           }
           setInput("");
           return;

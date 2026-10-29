@@ -78,6 +78,12 @@ export interface MemoryConfig {
   tokenBudget?: number;
   checkpointThresholdPct?: number;
   contextLimit?: number;
+  /**
+   * Kilo-style threshold_percent: compaction engages only once the estimated
+   * context crosses this share of the context limit (0 = legacy
+   * window-first semantics). Passed straight to ContextManager.
+   */
+  thresholdPercent?: number;
 }
 
 export interface AutomationConfig {

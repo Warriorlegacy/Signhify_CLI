@@ -34,11 +34,7 @@ export class CheckpointWriter {
   }
 
   async writeCheckpoint(data: CheckpointData): Promise<string> {
-    const dbStmt = (this.memoryStore as unknown as { db: { prepare: (sql: string) => { run: (...args: unknown[]) => unknown } } }).db.prepare(`
-      INSERT INTO checkpoints (session_id, summary, token_usage_at_checkpoint)
-      VALUES (?, ?, ?)
-    `);
-    dbStmt.run(data.sessionId, data.summary, data.tokenUsage);
+    this.memoryStore.saveCheckpoint(data.sessionId, data.summary, data.tokenUsage);
 
     const content: CheckpointFileContent = {
       timestamp: new Date().toISOString(),

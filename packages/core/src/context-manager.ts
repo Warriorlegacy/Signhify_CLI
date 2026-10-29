@@ -11,6 +11,7 @@ export class ContextManager {
   private checkpointThresholdPct: number;
   private contextLimit: number;
   private recentWindow: number;
+  private compactionThresholdPct: number;
 
   constructor(config?: {
     tokenBudget?: number;
@@ -18,11 +19,19 @@ export class ContextManager {
     contextLimit?: number;
     /** Turns always kept verbatim (T3.4 tier 1). */
     recentWindow?: number;
+    /**
+     * Kilo-style threshold_percent (kilocode packages/opencode/src/session/overflow.ts):
+     * when set (>0), older-than-window messages stay verbatim as long as the
+     * estimated session still fits under this share of the context limit AND
+     * inside the available budget. 0 keeps the legacy window-first semantics.
+     */
+    thresholdPercent?: number;
   }) {
     this.tokenBudget = config?.tokenBudget ?? 4000;
     this.checkpointThresholdPct = config?.checkpointThresholdPct ?? 80;
     this.contextLimit = config?.contextLimit ?? 128_000;
     this.recentWindow = config?.recentWindow ?? 20;
+    this.compactionThresholdPct = Math.min(100, Math.max(0, config?.thresholdPercent ?? 0));
   }
 
   assembleContext(params: {
@@ -50,6 +59,26 @@ export class ContextManager {
 
     const systemTokens = this.estimateTokens(systemContent);
     const availableBudget = Math.max(0, Math.min(this.contextLimit, this.tokenBudget) - systemTokens);
+
+    // Kilo-style preflight: below the compaction threshold (and inside the
+    // budget) nothing is pruned at all — no silent early loss of older turns.
+    if (this.compactionThresholdPct > 0) {
+      const estimatedAll = systemTokens + params.recentMessages.reduce(
+        (sum, m) => sum + this.estimateTokens(m.content),
+        0,
+      );
+      const thresholdLimit = Math.floor((this.compactionThresholdPct / 100) * this.contextLimit);
+      if (
+        estimatedAll <= thresholdLimit &&
+        estimatedAll - systemTokens <= availableBudget
+      ) {
+        return {
+          messages: [systemMsg, ...params.recentMessages],
+          totalTokens: estimatedAll,
+          compactedCount: 0,
+        };
+      }
+    }
 
     // T3.4 progressive pruning, applied oldest-tier-first:
     //   tier 1 — the last `recentWindow` turns stay verbatim (within budget);

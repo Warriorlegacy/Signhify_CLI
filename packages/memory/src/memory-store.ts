@@ -89,7 +89,30 @@ export class MemoryStore {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
+
+      -- /history retrieval: BM25 over checkpoint summaries (MiMo-Code
+      -- packages/cli/src/memory pattern: FTS retrieval on top of SQLite).
+      CREATE VIRTUAL TABLE IF NOT EXISTS checkpoints_fts USING fts5(
+        summary,
+        content='checkpoints',
+        content_rowid='id'
+      );
+
+      CREATE TRIGGER IF NOT EXISTS checkpoints_ai AFTER INSERT ON checkpoints BEGIN
+        INSERT INTO checkpoints_fts(rowid, summary) VALUES (new.id, new.summary);
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS checkpoints_ad AFTER DELETE ON checkpoints BEGIN
+        INSERT INTO checkpoints_fts(checkpoints_fts, rowid, summary) VALUES('delete', old.id, old.summary);
+      END;
     `);
+
+    // One-time backfill for DBs created before checkpoints_fts existed.
+    const ftsCount = (this.db.prepare('SELECT count(*) AS n FROM checkpoints_fts').get() as { n: number }).n;
+    const cpCount = (this.db.prepare('SELECT count(*) AS n FROM checkpoints').get() as { n: number }).n;
+    if (ftsCount === 0 && cpCount > 0) {
+      this.db.exec("INSERT INTO checkpoints_fts(checkpoints_fts) VALUES('rebuild')");
+    }
   }
 
   addEntry(entry: MemoryEntry): number {
@@ -204,6 +227,16 @@ export class MemoryStore {
     this.db.close();
   }
 
+  /** Append-only checkpoint insert; also feeds the /history FTS via trigger. */
+  saveCheckpoint(sessionId: string, summary: string, tokenUsage: number): number {
+    const result = this.db
+      .prepare(
+        'INSERT INTO checkpoints (session_id, summary, token_usage_at_checkpoint) VALUES (?, ?, ?)',
+      )
+      .run(sessionId, summary, tokenUsage);
+    return Number(result.lastInsertRowid);
+  }
+
   /** Register (or re touch) a session; same id resumes the row via upsert. */
   createSession(cwd?: string, id?: string): string {
     const sessionId = id ?? `sess_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -230,9 +263,28 @@ export class MemoryStore {
     return (row as SessionRecord) ?? null;
   }
 
+  /** FTS retrieval over checkpoint summaries — the /history read path. */
+  searchCheckpoints(query: string, limit = 10, sessionId?: string): CheckpointHit[] {
+    const ftsQuery = buildFtsQuery(query);
+    if (!ftsQuery) return [];
+    const stmt = this.db.prepare(`
+      SELECT c.id,
+             c.session_id as sessionId,
+             c.summary,
+             c.token_usage_at_checkpoint as tokenUsageAtCheckpoint,
+             c.created_at as createdAt,
+             snippet(checkpoints_fts, 0, '[', ']', '…', 12) as snippet
+      FROM checkpoints_fts f
+      JOIN checkpoints c ON c.id = f.rowid
+      WHERE checkpoints_fts MATCH ? ${sessionId ? 'AND c.session_id = ?' : ''}
+      ORDER BY rank
+      LIMIT ?
+    `);
+    return stmt.all(ftsQuery, ...(sessionId ? [sessionId] : []), limit) as CheckpointHit[];
+  }
+
   /** Newest checkpoint row for a session — the --resume read path. */
-  getCheckpointBySession(sessionId: string): {
-    summary: string;
+  getCheckpointBySession(sessionId: string): { summary: string;
     tokenUsageAtCheckpoint: number | null;
     createdAt: string | null;
   } | null {
@@ -254,4 +306,13 @@ export interface SessionRecord {
   cwd?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
+}
+
+export interface CheckpointHit {
+  id: number;
+  sessionId: string;
+  summary: string;
+  tokenUsageAtCheckpoint: number | null;
+  createdAt: string | null;
+  snippet: string;
 }

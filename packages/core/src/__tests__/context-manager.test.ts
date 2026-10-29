@@ -127,4 +127,79 @@ describe('ContextManager', () => {
     expect(result.messages[result.messages.length - 1].content).toBe('short newest answer');
     expect(result.messages[1].content).toContain('Oldest request: "long earliest message');
   });
+
+  it('thresholdPercent: sessions under the threshold stay fully verbatim, even older than the window', () => {
+    const cm = new ContextManager({
+      tokenBudget: 100_000,
+      contextLimit: 200_000,
+      thresholdPercent: 50,
+      recentWindow: 20,
+    });
+    const messages: Message[] = [];
+    for (let i = 0; i < 30; i++) {
+      messages.push({ role: 'user', content: `short turn ${i}` });
+    }
+
+    const result = cm.assembleContext({ systemPrompt: 'sys', recentMessages: messages });
+
+    // ~70 estimated tokens vs a 100k threshold: nothing pruned, no notice.
+    expect(result.compactedCount).toBe(0);
+    expect(result.messages).toHaveLength(31); // system + all 30 verbatim
+    expect(result.messages[1].content).toBe('short turn 0');
+  });
+
+  it('thresholdPercent: pruning engages once the estimated context crosses the threshold', () => {
+    const cm = new ContextManager({
+      tokenBudget: 1_000_000,
+      contextLimit: 200_000,
+      thresholdPercent: 50,
+      recentWindow: 20,
+    });
+    const messages = Array.from({ length: 30 }, (_, i) => ({
+      role: 'user' as const,
+      content: `turn ${i}: ${'x'.repeat(20_000)}`, // ~5k tokens each → 150k total > 100k threshold
+    }));
+
+    const result = cm.assembleContext({ systemPrompt: 'sys', recentMessages: messages });
+
+    expect(result.compactedCount).toBeGreaterThan(0);
+    expect(result.messages[1].content).toContain('[Context Notice:');
+  });
+
+  it('thresholdPercent: the token budget still cuts even below the threshold', () => {
+    const cm = new ContextManager({
+      tokenBudget: 40,
+      contextLimit: 200_000,
+      thresholdPercent: 90,
+      recentWindow: 20,
+    });
+    const messages: Message[] = [
+      { role: 'user', content: 'huge first message that the tiny budget must cut'.repeat(500) },
+      { role: 'user', content: 'huge second message same deal'.repeat(500) },
+      { role: 'assistant', content: 'short newest answer' },
+    ];
+
+    const result = cm.assembleContext({ systemPrompt: 'sys', recentMessages: messages });
+
+    // Below the threshold share, but over the actual availableBudget: pruning
+    // still has to fire, newest message stays.
+    expect(result.compactedCount).toBe(2);
+    expect(result.messages).toHaveLength(3);
+    expect(result.messages[result.messages.length - 1].content).toBe('short newest answer');
+  });
+
+  it('thresholdPercent: default 0 preserves the legacy window-first semantics', () => {
+    const cm = new ContextManager({ tokenBudget: 1_000_000, contextLimit: 200_000 });
+    const messages: Message[] = [];
+    for (let i = 0; i < 25; i++) {
+      messages.push({ role: 'user', content: `short turn ${i}` });
+    }
+
+    const result = cm.assembleContext({ systemPrompt: 'sys', recentMessages: messages });
+
+    // No threshold configured: anything older than the 20-message window is
+    // compacted exactly as T3.4 shipped it.
+    expect(result.compactedCount).toBe(5);
+    expect(result.messages).toHaveLength(22);
+  });
 });
