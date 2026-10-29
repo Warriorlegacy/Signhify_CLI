@@ -1,6 +1,6 @@
 {
   "name": "signhify",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "private": true,
   "description": "An open-source AI engineering partner — in the terminal and in the IDE",
   "license": "MIT",

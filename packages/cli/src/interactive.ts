@@ -43,6 +43,22 @@ import {
 } from "@signhify/tools";
 import { calculateTokenSpeed, formatSessionSummary } from "./tokens.js";
 import { Footer } from "./tui/footer.js";
+import { Header } from "./tui/header.js";
+import { getTheme, listThemes } from "./tui/theme.js";
+import {
+  AutocompleteOverlay,
+  shouldShowAutocomplete,
+  filterAutocomplete,
+  nextAutocompleteIndex,
+  DEFAULT_AUTOCOMPLETE_COMMANDS,
+} from "./tui/autocomplete.js";
+import { ChatMessageBubble } from "./tui/chat-message.js";
+import {
+  ModelPickerOverlay,
+  MODEL_CATALOG,
+  fuzzyFilterModels,
+  nextModelIndex,
+} from "./tui/model-picker.js";
 import { createRequire } from "node:module";
 import * as path from "node:path";
 
@@ -57,11 +73,10 @@ interface ChatMessage {
 const MODE_CYCLE = ["build", "plan", "debug", "compose"] as const;
 
 // Command palette registry — every entry dispatches a real handler below.
-// /model and /compact stay out until they are implemented; a palette entry
-// that dies on Enter would be a lie.
 const PALETTE_COMMANDS: PaletteCommand[] = [
   { name: "/clear", description: "clear the conversation" },
   { name: "/mode", description: "build | plan | debug | compose" },
+  { name: "/model", description: "select active AI model (Ctrl+M)" },
   { name: "/context-limit", description: "set the context token budget" },
   { name: "/usage", description: "show session token usage" },
   { name: "/provider", description: "show active provider and masked credentials" },
@@ -76,6 +91,7 @@ const PALETTE_COMMANDS: PaletteCommand[] = [
   { name: "/memory", description: "show MEMORY.md" },
   { name: "/dream", description: "consolidate session notes" },
   { name: "/distill", description: "distill long-term notes" },
+  { name: "/theme", description: "switch TUI color theme" },
   { name: "/exit", description: "quit Signhify" },
 ];
 
@@ -105,6 +121,11 @@ function ChatApp({
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState("");
   const [paletteIndex, setPaletteIndex] = useState(0);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [modelPickerQuery, setModelPickerQuery] = useState("");
+  const [modelPickerIndex, setModelPickerIndex] = useState(0);
+  const [themeName, setThemeName] = useState<string>("signhify-dark");
+  const [autocompleteIndex, setAutocompleteIndex] = useState(0);
   const [tokenUsage, setTokenUsage] = useState({
     used: 0,
     limit: config.memory?.contextLimit ?? 128000,
@@ -454,6 +475,43 @@ function ChatApp({
           setInput("");
           return;
         }
+        if (cmd === "/model") {
+          if (arg) {
+            const found = MODEL_CATALOG.find(
+              (m) =>
+                m.id.toLowerCase() === arg.toLowerCase() ||
+                m.name.toLowerCase() === arg.toLowerCase(),
+            );
+            const newModelId = found ? found.id : arg;
+            const providerVendor = found
+              ? (found.provider.toLowerCase() === "local" ? "ollama" : found.provider.toLowerCase())
+              : config.provider.agent.vendor;
+            setConfig((prev) => ({
+              ...prev,
+              provider: {
+                ...prev.provider,
+                agent: {
+                  ...prev.provider.agent,
+                  vendor: providerVendor as any,
+                  model: newModelId,
+                },
+              },
+            }));
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: "system",
+                content: `Switched model to [${newModelId}] (${found?.provider ?? providerVendor}).`,
+              },
+            ]);
+          } else {
+            setModelPickerOpen(true);
+            setModelPickerQuery("");
+            setModelPickerIndex(0);
+          }
+          setInput("");
+          return;
+        }
         if (cmd === "/models") {
           const agentKey =
             config.provider.agent.apiKey ??
@@ -658,6 +716,23 @@ function ChatApp({
           }
           return;
         }
+        if (cmd === "/theme") {
+          const themes = listThemes();
+          if (arg && themes.includes(arg.toLowerCase())) {
+            setThemeName(arg.toLowerCase());
+            setMessages((prev) => [
+              ...prev,
+              { role: "system", content: `TUI theme switched to [${arg.toLowerCase()}].` },
+            ]);
+          } else {
+            setMessages((prev) => [
+              ...prev,
+              { role: "system", content: `Available themes: ${themes.join(", ")}. Usage: /theme <name>` },
+            ]);
+          }
+          setInput("");
+          return;
+        }
       }
 
       setMessages((prev) => [...prev, { role: "user", content: value }]);
@@ -731,6 +806,57 @@ function ChatApp({
       setPaletteIndex(0);
       return;
     }
+    if (key.ctrl && inputChar === "m") {
+      setModelPickerOpen((prev) => !prev);
+      setModelPickerQuery("");
+      setModelPickerIndex(0);
+      return;
+    }
+    if (modelPickerOpen) {
+      const matches = fuzzyFilterModels(MODEL_CATALOG, modelPickerQuery);
+      if (key.upArrow) {
+        setModelPickerIndex((prev) => nextModelIndex(prev, matches.length, -1));
+      } else if (key.downArrow) {
+        setModelPickerIndex((prev) => nextModelIndex(prev, matches.length, 1));
+      } else if (key.return) {
+        const picked = matches[Math.min(modelPickerIndex, matches.length - 1)];
+        setModelPickerOpen(false);
+        setModelPickerQuery("");
+        setModelPickerIndex(0);
+        if (picked) {
+          const providerVendor =
+            picked.provider.toLowerCase() === "local"
+              ? "ollama"
+              : picked.provider.toLowerCase();
+          setConfig((prev) => ({
+            ...prev,
+            provider: {
+              ...prev.provider,
+              agent: {
+                ...prev.provider.agent,
+                vendor: providerVendor as any,
+                model: picked.id,
+              },
+            },
+          }));
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "system",
+              content: `Switched model to [${picked.id}] (${picked.provider}).`,
+            },
+          ]);
+        }
+      } else if (key.escape) {
+        setModelPickerOpen(false);
+        setModelPickerQuery("");
+      } else if (key.backspace || key.delete) {
+        setModelPickerQuery((prev) => prev.slice(0, -1));
+      } else if (inputChar && !key.ctrl && !key.meta) {
+        setModelPickerQuery((prev) => prev + inputChar);
+      }
+      return;
+    }
     if (paletteOpen) {
       if (key.upArrow) setPaletteIndex((prev) => nextPaletteIndex(prev, fuzzyFilter(PALETTE_COMMANDS, paletteQuery).length, -1));
       else if (key.downArrow) setPaletteIndex((prev) => nextPaletteIndex(prev, fuzzyFilter(PALETTE_COMMANDS, paletteQuery).length, 1));
@@ -755,6 +881,30 @@ function ChatApp({
       activeRun.current.abort();
       return;
     }
+    if (shouldShowAutocomplete(input) && !paletteOpen && !isLoading) {
+      const matches = filterAutocomplete(DEFAULT_AUTOCOMPLETE_COMMANDS, input);
+      if (key.upArrow) {
+        setAutocompleteIndex((prev) => nextAutocompleteIndex(prev, matches.length, -1));
+        return;
+      }
+      if (key.downArrow) {
+        setAutocompleteIndex((prev) => nextAutocompleteIndex(prev, matches.length, 1));
+        return;
+      }
+      if (key.tab && matches.length > 0) {
+        const item = matches[Math.min(autocompleteIndex, matches.length - 1)];
+        if (item) {
+          setInput(`${item.name} `);
+          setAutocompleteIndex(0);
+          return;
+        }
+      }
+      if (key.escape) {
+        setInput("");
+        setAutocompleteIndex(0);
+        return;
+      }
+    }
     if (key.ctrl && inputChar === "b") setShowSidebar((prev) => !prev);
     if (key.tab) {
       setMode((prev) => {
@@ -764,8 +914,7 @@ function ChatApp({
     }
   });
 
-  const modeColor =
-    mode === "build" ? "green" : mode === "plan" ? "cyan" : mode === "debug" ? "red" : "magenta";
+  const currentTheme = getTheme(themeName);
   const usagePct = (tokenUsage.used / tokenUsage.limit) * 100;
   const sidebarState: SidebarState = {
     tokenUsage,
@@ -788,87 +937,127 @@ function ChatApp({
         width: showSidebar ? "70%" : "100%",
         paddingRight: showSidebar ? 1 : 0,
       },
-      React.createElement(
-        Box,
-        { marginBottom: 1, justifyContent: "space-between" },
-        React.createElement(
-          Box,
-          null,
-          React.createElement(Text, { bold: true, color: "white" }, `Signhify CLI `),
-          React.createElement(Text, { color: "gray" }, `v${CLI_VERSION} `),
-          React.createElement(Text, { color: modeColor, bold: true }, `[${mode.toUpperCase()}]`),
-          goal ? React.createElement(Text, { color: "yellow" }, ` 🎯 "${goal.statement}"`) : null,
-        ),
-        React.createElement(Text, { color: "gray" }, "Tab: mode | Esc: cancel run | Ctrl+B: sidebar | Ctrl+P: commands"),
-      ),
+      React.createElement(Header, {
+        version: CLI_VERSION,
+        mode,
+        themeName,
+        theme: currentTheme,
+        modelName: config.provider.agent.model,
+        provider: config.provider.agent.vendor,
+        goal: goal ? goal.statement : undefined,
+      }),
       React.createElement(
         Box,
         { flexDirection: "column", marginBottom: 1 },
         messages.length === 0
           ? React.createElement(
               Text,
-              { color: "gray" },
-              "Type your objective or slash command (/goal, /mode, /context-limit, /sidebar, /dream)... ctrl+p for commands.",
+              { color: currentTheme.muted },
+              "Type your objective or slash command (/model, /goal, /mode, /context-limit, /sidebar, /dream, /theme)... Ctrl+M for models, Ctrl+P for commands.",
             )
           : messages.map((msg, i) =>
-              React.createElement(
-                Box,
-                { key: i, marginBottom: 1 },
-                React.createElement(
-                  Text,
-                  {
-                    bold: true,
-                    color:
-                      msg.role === "user" ? "blue" : msg.role === "system" ? "yellow" : "green",
-                  },
-                  `${msg.role === "user" ? "You" : msg.role === "system" ? "System" : "AI"}: `,
-                ),
-                React.createElement(Text, {}, msg.content),
-              ),
+              React.createElement(ChatMessageBubble, {
+                key: i,
+                role: msg.role,
+                content: msg.content,
+              }),
             ),
       ),
       React.createElement(
         Box,
-        null,
-        isLoading
-          ? pendingConfirmation
-            ? React.createElement(
+        { flexDirection: "column" },
+        shouldShowAutocomplete(input) && !isLoading && !paletteOpen && !modelPickerOpen
+          ? React.createElement(AutocompleteOverlay, {
+              query: input,
+              selectedIndex: autocompleteIndex,
+              themeName,
+              theme: currentTheme,
+            })
+          : null,
+        React.createElement(
+          Box,
+          null,
+          isLoading
+            ? pendingConfirmation
+              ? React.createElement(
+                  Box,
+                  { flexDirection: "column", borderStyle: "round", borderColor: "yellow", paddingX: 1 },
+                  React.createElement(Text, { bold: true, color: "yellow" }, "Review requested action"),
+                  React.createElement(Text, { wrap: "wrap" }, pendingConfirmation.message),
+                  React.createElement(Text, { color: "gray" }, "Y: approve | N: deny | Esc: cancel the run"),
+                )
+              : React.createElement(
                 Box,
-                { flexDirection: "column", borderStyle: "round", borderColor: "yellow", paddingX: 1 },
-                React.createElement(Text, { bold: true, color: "yellow" }, "Review requested action"),
-                React.createElement(Text, { wrap: "wrap" }, pendingConfirmation.message),
-                React.createElement(Text, { color: "gray" }, "Y: approve | N: deny | Esc: cancel the run"),
+                null,
+                React.createElement(Spinner, { type: "dots" }),
+                React.createElement(
+                  Text,
+                  { color: "yellow" },
+                  runningTools > 0
+                    ? ` Running ${runningTools} tool${runningTools === 1 ? "" : "s"}...`
+                    : " Thinking...",
+                ),
               )
-            : React.createElement(
-              Box,
-              null,
-              React.createElement(Spinner, { type: "dots" }),
-              React.createElement(
-                Text,
-                { color: "yellow" },
-                runningTools > 0
-                  ? ` Running ${runningTools} tool${runningTools === 1 ? "" : "s"}...`
-                  : " Thinking...",
-              ),
-            )
-          : paletteOpen
-            ? React.createElement(PaletteOverlay, {
-                query: paletteQuery,
-                matches: fuzzyFilter(PALETTE_COMMANDS, paletteQuery),
-                index: Math.min(paletteIndex, fuzzyFilter(PALETTE_COMMANDS, paletteQuery).length - 1),
-              })
-            : React.createElement(TextInput, {
-                value: input,
-                onChange: setInput,
-                onSubmit: handleSubmit,
-                placeholder: "Ask a question, enter instructions, or type /help...",
-              }),
+            : modelPickerOpen
+              ? React.createElement(ModelPickerOverlay, {
+                  activeModelId: config.provider.agent.model,
+                  query: modelPickerQuery,
+                  focusIndex: modelPickerIndex,
+                  onSelect: (modelId) => {
+                    const picked = MODEL_CATALOG.find((m) => m.id === modelId);
+                    const providerVendor =
+                      picked && picked.provider.toLowerCase() === "local"
+                        ? "ollama"
+                        : (picked?.provider.toLowerCase() ?? config.provider.agent.vendor);
+                    setConfig((prev) => ({
+                      ...prev,
+                      provider: {
+                        ...prev.provider,
+                        agent: {
+                          ...prev.provider.agent,
+                          vendor: providerVendor as any,
+                          model: modelId,
+                        },
+                      },
+                    }));
+                    setMessages((prev) => [
+                      ...prev,
+                      {
+                        role: "system",
+                        content: `Switched model to [${modelId}] (${picked?.provider ?? providerVendor}).`,
+                      },
+                    ]);
+                    setModelPickerOpen(false);
+                    setModelPickerQuery("");
+                    setModelPickerIndex(0);
+                  },
+                })
+              : paletteOpen
+                ? React.createElement(PaletteOverlay, {
+                    query: paletteQuery,
+                    matches: fuzzyFilter(PALETTE_COMMANDS, paletteQuery),
+                    index: Math.min(paletteIndex, fuzzyFilter(PALETTE_COMMANDS, paletteQuery).length - 1),
+                  })
+                : React.createElement(TextInput, {
+                    value: input,
+                    onChange: (val) => {
+                      setInput(val);
+                      setAutocompleteIndex(0);
+                    },
+                    onSubmit: handleSubmit,
+                    placeholder: "Ask a question, enter instructions, or type /help...",
+                  }),
+        ),
       ),
       React.createElement(Footer, {
         tokensUsed: tokenUsage.used,
         tokenLimit: tokenUsage.limit,
         tokensPerSecond,
         activeRouterInfo,
+        providerId: config.provider.agent.vendor,
+        modelId: config.provider.agent.model,
+        themeName,
+        theme: currentTheme,
       }),
     ),
 

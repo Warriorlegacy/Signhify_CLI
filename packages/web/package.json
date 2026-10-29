@@ -1,6 +1,6 @@
 {
   "name": "@signhify/web",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Signhify Web Platform and UI preview components",
   "license": "MIT",
   "type": "module",
@@ -23,8 +23,8 @@
     "clean": "node -e \"const {rmSync,existsSync}=require('fs');['dist','*.tsbuildinfo'].forEach(p=>{if(existsSync(p))rmSync(p,{recursive:true,force:true})})\""
   },
   "dependencies": {
-    "@signhify/core": "^0.3.2",
-    "@signhify/providers": "^0.3.2"
+    "@signhify/core": "^0.4.0",
+    "@signhify/providers": "^0.4.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
