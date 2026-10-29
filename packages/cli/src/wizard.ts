@@ -61,7 +61,8 @@ function WizardApp() {
         agent: {
           vendor: provider,
           model: model || 'gpt-4',
-          apiKey: trimmed,
+          // Wizard input is a plaintext key — stored as apiKeyRef (single source).
+          apiKeyRef: trimmed,
           ...(provider === 'openai-compatible' && { baseUrl: 'http://localhost:11434/v1' }),
         },
       },

@@ -3,7 +3,18 @@ import { render, Box, Text, useInput, useApp } from "ink";
 import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
 import { SignhifyConfig, AgentLoop, Goal, TaskNode } from "@signhify/core";
-import { saveConfig } from "./config.js";
+import { saveConfig, resolveApiKeyRef } from "./config.js";
+import {
+  buildSidebarSections,
+  type SidebarState,
+  toggleSidebarSection,
+} from "./tui/sidebar/index.js";
+import {
+  fuzzyFilter,
+  nextPaletteIndex,
+  PaletteOverlay,
+  type PaletteCommand,
+} from "./tui/palette.js";
 import {
   createAdapter,
   FallbackRouter,
@@ -39,12 +50,21 @@ interface ChatMessage {
 
 const MODE_CYCLE = ["build", "plan", "debug", "compose"] as const;
 
-function renderProgressBar(percentage: number, length = 12): string {
-  const clamped = Math.max(0, Math.min(100, percentage));
-  const filled = Math.round((clamped / 100) * length);
-  const empty = length - filled;
-  return `[${"█".repeat(filled)}${"░".repeat(empty)}] ${clamped.toFixed(0)}%`;
-}
+// Command palette registry — every entry dispatches a real handler below.
+// /model and /compact stay out until they are implemented; a palette entry
+// that dies on Enter would be a lie.
+const PALETTE_COMMANDS: PaletteCommand[] = [
+  { name: "/clear", description: "clear the conversation" },
+  { name: "/mode", description: "build | plan | debug | compose" },
+  { name: "/context-limit", description: "set the context token budget" },
+  { name: "/sidebar", description: "toggle sidebar (or collapse <id>)" },
+  { name: "/goal", description: "set the stop condition" },
+  { name: "/mcp", description: "show MCP server status" },
+  { name: "/memory", description: "show MEMORY.md" },
+  { name: "/dream", description: "consolidate session notes" },
+  { name: "/distill", description: "distill long-term notes" },
+  { name: "/exit", description: "quit Signhify" },
+];
 
 function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
   // Mutable copy so runtime settings (/context-limit) survive into the loop
@@ -60,6 +80,10 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
   const [checkpointContent, setCheckpointContent] = useState("");
   const [taskProgress, setTaskProgress] = useState("");
   const [showSidebar, setShowSidebar] = useState(true);
+  const [collapsedSections, setCollapsedSections] = useState<string[]>([]);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState("");
+  const [paletteIndex, setPaletteIndex] = useState(0);
   const [tokenUsage, setTokenUsage] = useState({
     used: 0,
     limit: config.memory?.contextLimit ?? 128000,
@@ -109,10 +133,18 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
 
   const buildLoop = useCallback(async () => {
     let adapter;
-    const fallbackChain =
+    const rawChain =
       config.provider.fallbackChain && config.provider.fallbackChain.length > 0
         ? config.provider.fallbackChain
         : DEFAULT_ZERO_COST_CHAIN;
+    // apiKeyRef (env:/literal) is the single source; resolve to the concrete
+    // key the provider factory expects before routing.
+    const fallbackChain = (await Promise.all(
+      (rawChain as import("@signhify/providers").EndpointConfig[]).map(async (ep) => {
+        const key = await resolveApiKeyRef(ep.apiKeyRef);
+        return "apiKeyRef" in ep && key != null ? { ...ep, apiKey: key } : ep;
+      }),
+    )) as import("@signhify/providers").EndpointConfig[];
 
     if (process.env.SIGNHIFY_MOCK_PROVIDER === "1" || config.provider.agent.vendor === "mock") {
       adapter = await createAdapter({ vendor: "mock", model: "mock-model" });
@@ -199,7 +231,12 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
           return;
         }
         if (cmd === "/sidebar") {
-          setShowSidebar((prev) => !prev);
+          // "/sidebar" toggles the sidebar; "/sidebar <id>" collapses one section.
+          if (arg) {
+            setCollapsedSections((prev) => toggleSidebarSection(prev, arg));
+          } else {
+            setShowSidebar((prev) => !prev);
+          }
           setInput("");
           return;
         }
@@ -263,6 +300,36 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
             setGoal(newGoal);
             setMessages((prev) => [...prev, { role: "system", content: `Goal set: "${arg}"` }]);
           }
+          setInput("");
+          return;
+        }
+        if (cmd === "/mcp") {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "system",
+              content:
+                mcpStatuses.length === 0
+                  ? "No MCP servers connected."
+                  : `MCP servers:\n${mcpStatuses
+                      .map(
+                        (s) =>
+                          `● ${s.name}: ${s.status}${s.error ? ` (${s.error})` : ""}`,
+                      )
+                      .join("\n")}`,
+            },
+          ]);
+          setInput("");
+          return;
+        }
+        if (cmd === "/memory") {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "system",
+              content: memoryContent || "MEMORY.md is empty or missing.",
+            },
+          ]);
           setInput("");
           return;
         }
@@ -355,6 +422,32 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
 
   useInput((inputChar, key) => {
     if (key.ctrl && inputChar === "c") exit();
+    if (key.ctrl && inputChar === "p") {
+      setPaletteOpen((prev) => !prev);
+      setPaletteQuery("");
+      setPaletteIndex(0);
+      return;
+    }
+    if (paletteOpen) {
+      if (key.upArrow) setPaletteIndex((prev) => nextPaletteIndex(prev, fuzzyFilter(PALETTE_COMMANDS, paletteQuery).length, -1));
+      else if (key.downArrow) setPaletteIndex((prev) => nextPaletteIndex(prev, fuzzyFilter(PALETTE_COMMANDS, paletteQuery).length, 1));
+      else if (key.return) {
+        const matches = fuzzyFilter(PALETTE_COMMANDS, paletteQuery);
+        const picked = matches[Math.min(paletteIndex, matches.length - 1)];
+        setPaletteOpen(false);
+        setPaletteQuery("");
+        setPaletteIndex(0);
+        if (picked) void handleSubmit(picked.name);
+      } else if (key.escape) {
+        setPaletteOpen(false);
+        setPaletteQuery("");
+      } else if (key.backspace || key.delete) {
+        setPaletteQuery((prev) => prev.slice(0, -1));
+      } else if (inputChar && !key.ctrl && !key.meta) {
+        setPaletteQuery((prev) => prev + inputChar);
+      }
+      return;
+    }
     if (key.ctrl && inputChar === "b") setShowSidebar((prev) => !prev);
     if (key.tab) {
       setMode((prev) => {
@@ -367,6 +460,14 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
   const modeColor =
     mode === "build" ? "green" : mode === "plan" ? "cyan" : mode === "debug" ? "red" : "magenta";
   const usagePct = (tokenUsage.used / tokenUsage.limit) * 100;
+  const sidebarState: SidebarState = {
+    tokenUsage,
+    usagePct,
+    activeRouterInfo,
+    mcpStatuses,
+    taskTree,
+    collapsed: collapsedSections,
+  };
 
   return React.createElement(
     Box,
@@ -390,7 +491,7 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
           React.createElement(Text, { color: modeColor, bold: true }, `[${mode.toUpperCase()}]`),
           goal ? React.createElement(Text, { color: "yellow" }, ` 🎯 "${goal.statement}"`) : null,
         ),
-        React.createElement(Text, { color: "gray" }, "Tab: toggle mode | Ctrl+B: toggle sidebar"),
+        React.createElement(Text, { color: "gray" }, "Tab: mode | Ctrl+B: sidebar | Ctrl+P: commands"),
       ),
       React.createElement(
         Box,
@@ -399,7 +500,7 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
           ? React.createElement(
               Text,
               { color: "gray" },
-              "Type your objective or slash command (/goal, /mode, /context-limit, /sidebar, /dream)...",
+              "Type your objective or slash command (/goal, /mode, /context-limit, /sidebar, /dream)... ctrl+p for commands.",
             )
           : messages.map((msg, i) =>
               React.createElement(
@@ -434,12 +535,18 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
                   : " Thinking...",
               ),
             )
-          : React.createElement(TextInput, {
-              value: input,
-              onChange: setInput,
-              onSubmit: handleSubmit,
-              placeholder: "Ask a question, enter instructions, or type /help...",
-            }),
+          : paletteOpen
+            ? React.createElement(PaletteOverlay, {
+                query: paletteQuery,
+                matches: fuzzyFilter(PALETTE_COMMANDS, paletteQuery),
+                index: Math.min(paletteIndex, fuzzyFilter(PALETTE_COMMANDS, paletteQuery).length - 1),
+              })
+            : React.createElement(TextInput, {
+                value: input,
+                onChange: setInput,
+                onSubmit: handleSubmit,
+                placeholder: "Ask a question, enter instructions, or type /help...",
+              }),
       ),
     ),
 
@@ -448,87 +555,8 @@ function ChatApp({ config: initialConfig }: { config: SignhifyConfig }) {
       ? React.createElement(
           Box,
           { flexDirection: "column", width: "30%", borderStyle: "single", paddingLeft: 1 },
-          React.createElement(Text, { bold: true, color: "cyan" }, "Context & Memory"),
-          React.createElement(Text, { color: "gray" }, "─────────────────────────"),
-          React.createElement(
-            Box,
-            { flexDirection: "column", marginBottom: 1 },
-            React.createElement(Text, {}, `Tokens: ${tokenUsage.used} / ${tokenUsage.limit}`),
-            React.createElement(
-              Text,
-              { color: usagePct > 80 ? "red" : "green" },
-              renderProgressBar(usagePct),
-            ),
-            React.createElement(Text, { color: "gray" }, "Auto-compact at 80%"),
-          ),
-
-          React.createElement(Text, { bold: true, color: "yellow" }, "Active Router"),
-          React.createElement(Text, { color: "gray" }, "─────────────────────────"),
-          React.createElement(
-            Box,
-            { marginBottom: 1 },
-            React.createElement(Text, { color: "green" }, "● "),
-            React.createElement(Text, {}, activeRouterInfo),
-          ),
-
-          React.createElement(Text, { bold: true, color: "magenta" }, "MCP Servers"),
-          React.createElement(Text, { color: "gray" }, "─────────────────────────"),
-          React.createElement(
-            Box,
-            { flexDirection: "column", marginBottom: 1 },
-            mcpStatuses.map((s, idx) =>
-              React.createElement(
-                Box,
-                { key: idx },
-                React.createElement(
-                  Text,
-                  {
-                    color:
-                      s.status === "connected"
-                        ? "green"
-                        : s.status === "failed"
-                          ? "red"
-                          : "gray",
-                  },
-                  "● ",
-                ),
-                React.createElement(Text, {}, s.name),
-                s.status === "failed" && s.error
-                  ? React.createElement(Text, { color: "red" }, ` ${s.error.slice(0, 24)}`)
-                  : null,
-              ),
-            ),
-          ),
-
-          React.createElement(Text, { bold: true, color: "blue" }, "Task Tree (T1 -> T1.1)"),
-          React.createElement(Text, { color: "gray" }, "─────────────────────────"),
-          taskTree.length === 0
-            ? React.createElement(Text, { color: "gray" }, "  (no tasks active)")
-            : taskTree.map((task) =>
-                React.createElement(
-                  Box,
-                  { key: task.id },
-                  React.createElement(
-                    Text,
-                    {
-                      color:
-                        task.status === "done"
-                          ? "green"
-                          : task.status === "in_progress"
-                            ? "yellow"
-                            : task.status === "blocked"
-                              ? "red"
-                              : "gray",
-                    },
-                    `${task.parentId ? "  └─ " : ""}${task.id} [${task.status}] `,
-                  ),
-                  React.createElement(
-                    Text,
-                    {},
-                    task.title.length > 14 ? task.title.slice(0, 14) + "…" : task.title,
-                  ),
-                ),
-              ),
+          sidebarState &&
+            buildSidebarSections().map((section) => section.render(sidebarState)),
         )
       : null,
   );

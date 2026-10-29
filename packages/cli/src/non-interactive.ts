@@ -2,6 +2,7 @@ import { SignhifyConfig, AgentLoop } from '@signhify/core';
 import { createAdapter, FallbackRouter, DEFAULT_ZERO_COST_CHAIN, type FallbackEvent } from '@signhify/providers';
 import { fileIoTool, shellExecTool, gitTool, searchTool, browserTool, mcpClientTool, subagentTool } from '@signhify/tools';
 import { MemoryStore, CheckpointWriter, MemoryMdManager } from '@signhify/memory';
+import { resolveApiKeyRef } from './config.js';
 import * as path from 'node:path';
 
 interface RunOptions {
@@ -53,10 +54,17 @@ export async function runNonInteractive(
     }
 
     let adapter;
-    const fallbackChain =
+    const rawChain =
       config.provider.fallbackChain && config.provider.fallbackChain.length > 0
         ? config.provider.fallbackChain
         : DEFAULT_ZERO_COST_CHAIN;
+    // apiKeyRef (env:/literal) resolves to the concrete key the factory expects.
+    const fallbackChain = (await Promise.all(
+      (rawChain as import("@signhify/providers").EndpointConfig[]).map(async (ep) => {
+        const key = await resolveApiKeyRef(ep.apiKeyRef);
+        return "apiKeyRef" in ep && key != null ? { ...ep, apiKey: key } : ep;
+      }),
+    )) as import("@signhify/providers").EndpointConfig[];
 
     if (process.env.SIGNHIFY_MOCK_PROVIDER === "1" || config.provider.agent.vendor === "mock") {
       adapter = await createAdapter({ vendor: "mock", model: "mock-model" });

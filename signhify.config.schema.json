@@ -41,6 +41,8 @@
       "properties": {
         "tokenBudget": {
           "type": "integer",
+          "minimum": 100,
+          "maximum": 100000,
           "default": 4000,
           "description": "Max tokens of memory injected per turn."
         },

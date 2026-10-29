@@ -1,6 +1,8 @@
 import fs from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import type { SignhifyConfig } from "@signhify/core";
 
@@ -34,65 +36,139 @@ const DEFAULT_CONFIG: SignhifyConfig = {
 };
 
 export async function signhifyConfigSchema(config: SignhifyConfig): Promise<SignhifyConfig> {
-  const errors: string[] = [];
+  const schema = loadConfigSchema();
+  const errors = validateAgainstSchema(schema, config, "$", (schema as JsonObjectSchema).$defs ?? {});
+  if (errors.length > 0) {
+    throw new Error(`Config validation failed:\n${errors.map((e) => `  - ${e}`).join("\n")}`);
+  }
+  return config;
+}
 
-  if (!config.provider) {
-    errors.push('Missing "provider" section');
-  } else {
-    const agent = config.provider.agent;
-    if (!agent?.vendor) errors.push('Missing provider.agent.vendor');
-    if (!agent?.model) errors.push('Missing provider.agent.model');
-    if (agent?.vendor === 'openai-compatible' && !agent?.baseUrl) {
-      errors.push('openai-compatible provider requires baseUrl');
+/** Minimal JSON Schema subset covering exactly the constructs the shipped file uses. */
+interface JsonObjectSchema {
+  type?: string;
+  properties?: Record<string, JsonObjectSchema>;
+  items?: JsonObjectSchema;
+  required?: string[];
+  enum?: string[];
+  additionalProperties?: boolean;
+  minimum?: number;
+  maximum?: number;
+  $ref?: string;
+  $defs?: Record<string, JsonObjectSchema>;
+}
+
+/**
+ * Single source: `signhify.config.schema.json` at the repo root (shipped next to
+ * config.js inside dist/ by the cli build). Walks up parent dirs so src/ tests,
+ * dist/ runtime, and arbitrary cwd's all resolve the same file.
+ */
+function loadConfigSchema(): JsonObjectSchema {
+  let dir = path.dirname(fileURLToPath(import.meta.url));
+  for (let depth = 0; depth < 6; depth++) {
+    try {
+      return JSON.parse(readFileSync(path.join(dir, "signhify.config.schema.json"), "utf-8")) as JsonObjectSchema;
+    } catch {
+      dir = path.dirname(dir);
     }
+  }
+  throw new Error("signhify.config.schema.json not found — cannot validate config");
+}
 
-    const ac = config.provider.autocomplete;
-    if (ac && ac.vendor === 'openai-compatible' && !ac.baseUrl) {
-      errors.push('openai-compatible autocomplete provider requires baseUrl');
-    }
-
-    if (config.provider.fallbackChain) {
-      if (!Array.isArray(config.provider.fallbackChain)) {
-        errors.push('provider.fallbackChain must be an array');
-      } else {
-        for (const ep of config.provider.fallbackChain) {
-          if (!ep.name || !ep.vendor || !ep.model) {
-            errors.push('Each fallbackChain entry requires name, vendor, and model');
-          }
+function validateAgainstSchema(
+  schema: JsonObjectSchema,
+  value: unknown,
+  at: string,
+  defs: Record<string, JsonObjectSchema>,
+): string[] {
+  if (schema.$ref) {
+    const refName = schema.$ref.split("/").pop()!;
+    const resolved = defs[refName];
+    if (!resolved) return [`${at}: unresolved $ref ${schema.$ref}`];
+    return validateAgainstSchema(resolved, value, at, defs);
+  }
+  switch (schema.type) {
+    case "object": {
+      if (value === null || typeof value !== "object" || Array.isArray(value)) {
+        return [`${at} must be an object`];
+      }
+      const obj = value as Record<string, unknown>;
+      const errors: string[] = [];
+      for (const req of schema.required ?? []) {
+        if (!(req in obj)) errors.push(`${at} missing required "${req}"`);
+      }
+      for (const [key, sub] of Object.entries(schema.properties ?? {})) {
+        if (key in obj) errors.push(...validateAgainstSchema(sub, obj[key], `${at}.${key}`, defs));
+      }
+      if (schema.additionalProperties === false) {
+        for (const key of Object.keys(obj)) {
+          if (!(key in (schema.properties ?? {}))) errors.push(`${at}.${key} is not an allowed property`);
         }
       }
+      return errors;
     }
+    case "array": {
+      if (!Array.isArray(value)) return [`${at} must be an array`];
+      if (schema.items) {
+        return value.flatMap((item, i) => validateAgainstSchema(schema.items!, item, `${at}[${i}]`, defs));
+      }
+      return [];
+    }
+    case "string": {
+      if (typeof value !== "string") return [`${at} must be a string`];
+      if (schema.enum && !schema.enum.includes(value)) {
+        return [`${at} must be one of: ${schema.enum.join(", ")}`];
+      }
+      return [];
+    }
+    case "integer": {
+      if (typeof value !== "number" || !Number.isInteger(value)) {
+        return [`${at} must be an integer`];
+      }
+      if (schema.minimum !== undefined && value < schema.minimum) {
+        return [`${at} must be >= ${schema.minimum}`];
+      }
+      if (schema.maximum !== undefined && value > schema.maximum) {
+        return [`${at} must be <= ${schema.maximum}`];
+      }
+      return [];
+    }
+    case "boolean":
+      return typeof value === "boolean" ? [] : [`${at} must be a boolean`];
+    default:
+      return [];
   }
+}
 
-  if (config.memory) {
-    const budget = config.memory.tokenBudget;
-    if (budget !== undefined && (budget < 100 || budget > 100000)) {
-      errors.push(`memory.tokenBudget must be between 100 and 100000, got ${budget}`);
+/**
+ * Legacy configs stored a plaintext `apiKey`; the schema (single source)
+ * only allows `apiKeyRef`. Map legacy → ref in place before validation.
+ */
+function migrateLegacyApiKey(config: SignhifyConfig): SignhifyConfig {
+  const agent = config.provider?.agent;
+  if (agent) {
+    if (agent.apiKey !== undefined && agent.apiKeyRef === undefined) {
+      agent.apiKeyRef = agent.apiKey;
     }
-    const threshold = config.memory.checkpointThresholdPct;
-    if (threshold !== undefined && (threshold < 1 || threshold > 99)) {
-      errors.push(`memory.checkpointThresholdPct must be between 1 and 99, got ${threshold}`);
-    }
-    const limit = config.memory.contextLimit;
-    if (limit !== undefined && (limit < 1000 || limit > 2000000)) {
-      errors.push(`memory.contextLimit must be between 1000 and 2000000, got ${limit}`);
-    }
+    delete agent.apiKey;
   }
-
-  if (config.automation) {
-    if (!Array.isArray(config.automation.shellAllowlist)) {
-      errors.push('automation.shellAllowlist must be an array');
-    }
-    if (!Array.isArray(config.automation.shellDenylist)) {
-      errors.push('automation.shellDenylist must be an array');
-    }
-  }
-
-  if (errors.length > 0) {
-    throw new Error(`Config validation failed:\n${errors.map(e => `  - ${e}`).join('\n')}`);
-  }
-
   return config;
+}
+
+/** Resolve an apiKeyRef: "env:NAME" | "keytar:service:account" | literal key. */
+export async function resolveApiKeyRef(ref: string | undefined): Promise<string | undefined> {
+  if (ref === undefined) return undefined;
+  if (ref.startsWith("env:")) return process.env[ref.slice(4)] || undefined;
+  if (ref.startsWith("keytar:")) {
+    if (!keytar) {
+      throw new Error(`Config references keytar key "${ref}" but keytar is not installed. Install keytar or use an env: reference.`);
+    }
+    const account = ref.split(":").slice(2).join(":");
+    const password = await keytar.getPassword(KEYTAR_SERVICE, account);
+    if (!password) throw new Error(`Keychain key not found for service="${KEYTAR_SERVICE}" account="${account}".`);
+    return password;
+  }
+  return ref;
 }
 
 export async function loadConfig(projectDir?: string): Promise<SignhifyConfig> {
@@ -100,27 +176,30 @@ export async function loadConfig(projectDir?: string): Promise<SignhifyConfig> {
   const projectConfigPath = path.join(dir, ".signhify", "config.json");
   try {
     const content = await fs.readFile(projectConfigPath, "utf-8");
-    const parsed = JSON.parse(content) as Partial<SignhifyConfig>;
+    const parsed = migrateLegacyApiKey(JSON.parse(content) as SignhifyConfig);
     await signhifyConfigSchema(parsed as SignhifyConfig);
-    return { ...DEFAULT_CONFIG, ...(await resolveKeytarRefs(parsed as SignhifyConfig)) } as SignhifyConfig;
-  } catch {
-    // no project config or validation failed
+    return { ...DEFAULT_CONFIG, ...(await resolveAgentApiKey(parsed as SignhifyConfig)) } as SignhifyConfig;
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Config validation failed")) throw error;
+    // no project config
   }
 
   const globalConfigPath = path.join(os.homedir(), ".config", "signhify", "config.json");
   try {
     const content = await fs.readFile(globalConfigPath, "utf-8");
-    const parsed = JSON.parse(content) as Partial<SignhifyConfig>;
+    const parsed = migrateLegacyApiKey(JSON.parse(content) as SignhifyConfig);
     await signhifyConfigSchema(parsed as SignhifyConfig);
-    return { ...DEFAULT_CONFIG, ...(await resolveKeytarRefs(parsed as SignhifyConfig)) } as SignhifyConfig;
-  } catch {
-    // no global config or validation failed
+    return { ...DEFAULT_CONFIG, ...(await resolveAgentApiKey(parsed as SignhifyConfig)) } as SignhifyConfig;
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Config validation failed")) throw error;
+    // no global config
   }
 
   return DEFAULT_CONFIG;
 }
 
 export async function saveConfig(config: SignhifyConfig, projectDir?: string): Promise<void> {
+  migrateLegacyApiKey(config);
   const validated = await signhifyConfigSchema(config);
   const toSave = await storeKeytarRefs(validated);
   const dir = projectDir ?? process.cwd();
@@ -130,45 +209,35 @@ export async function saveConfig(config: SignhifyConfig, projectDir?: string): P
 }
 
 async function storeKeytarRefs(config: SignhifyConfig): Promise<SignhifyConfig> {
-  if (!keytar || !config.provider?.agent?.apiKey) return config;
+  const resolvedRef = config.provider?.agent?.apiKeyRef;
+  // Plaintext refs are keychain candidates; env:/missing are left alone.
+  if (!keytar || !resolvedRef || resolvedRef.startsWith("env:") || resolvedRef.startsWith("keytar:")) {
+    return config;
+  }
 
   const account = config.provider.agent.model;
-  const apiKey = config.provider.agent.apiKey;
-
   try {
-    await keytar.setPassword(KEYTAR_SERVICE, account, apiKey);
+    await keytar.setPassword(KEYTAR_SERVICE, account, resolvedRef);
+    const agent = { ...config.provider.agent };
+    delete (agent as Record<string, unknown>).apiKey;
     return {
       ...config,
-      provider: {
-        ...config.provider,
-        agent: { ...config.provider.agent, apiKey: `keytar:${KEYTAR_SERVICE}:${account}` },
-      },
+      provider: { ...config.provider, agent: { ...agent, apiKeyRef: `keytar:${KEYTAR_SERVICE}:${account}` } },
     };
   } catch {
-    // keychain write failed — keep plaintext key in config
+    // keychain write failed — keep the literal ref in config
     return config;
   }
 }
 
-async function resolveKeytarRefs(config: SignhifyConfig): Promise<SignhifyConfig> {
-  const agentKey = config.provider?.agent?.apiKey;
-  if (!agentKey || !agentKey.startsWith("keytar:")) return config;
-  if (!keytar) {
-    throw new Error(`Config references keytar key "${agentKey}" but keytar is not installed. Install keytar or use a plain API key.`);
-  }
-
-  const parts = agentKey.split(":");
-  const account = parts.slice(2).join(":");
-  const password = await keytar.getPassword(KEYTAR_SERVICE, account);
-  if (!password) {
-    throw new Error(`Keychain key not found for service="${KEYTAR_SERVICE}" account="${account}". Run the setup wizard to re-enter your API key.`);
-  }
-
+async function resolveAgentApiKey(config: SignhifyConfig): Promise<SignhifyConfig> {
+  delete config.provider?.agent?.apiKey;
+  const resolved = await resolveApiKeyRef(config.provider?.agent?.apiKeyRef);
   return {
     ...config,
     provider: {
       ...config.provider,
-      agent: { ...config.provider.agent, apiKey: password },
+      agent: { ...config.provider.agent, apiKey: resolved },
     },
   };
 }

@@ -9,7 +9,7 @@
   },
   "license": "MIT",
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b && node -e \"const {copyFileSync}=require('fs');copyFileSync('../../signhify.config.schema.json','dist/signhify.config.schema.json')\"",
     "test": "node ../../node_modules/vitest/vitest.mjs run",
     "typecheck": "tsc --noEmit"
   },
