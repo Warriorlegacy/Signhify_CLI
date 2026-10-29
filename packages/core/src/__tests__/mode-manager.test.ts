@@ -32,6 +32,11 @@ describe('ModeManager', () => {
     // file-io is permitted in both build and plan; writes are gated by action.
     expect(mm.isToolAllowed('file-io', 'build')).toBe(true);
     expect(mm.isToolAllowed('file-io', 'plan')).toBe(true);
+    // Subagent dispatch is available in every built-in mode.
+    expect(mm.isToolAllowed('subagent', 'build')).toBe(true);
+    expect(mm.isToolAllowed('subagent', 'plan')).toBe(true);
+    expect(mm.isToolAllowed('subagent', 'debug')).toBe(true);
+    expect(mm.isToolAllowed('subagent', 'compose')).toBe(true);
   });
 
   it('should support custom modes', () => {
