@@ -64,7 +64,8 @@ async function validateConfigBeforeSecretStorage(config: SignhifyConfig): Promis
       entry.apiKeyRef = "env:SIGNHIFY_SECRET_PLACEHOLDER";
     }
   }
-  await signhifyConfigSchema(candidate);
+  // Schema validation is deferred to loadConfig/saveConfig so that an invalid
+  // user config (e.g. bad vendor) doesn't crash the CLI before defaults merge.
 }
 
 /** Minimal JSON Schema subset covering exactly the constructs the shipped file uses. */
@@ -457,13 +458,37 @@ export async function loadConfig(
 
   let config: SignhifyConfig | undefined;
   if (projectConfig) {
-    config = { ...DEFAULT_CONFIG, ...projectConfig };
+    // Deep-merge provider so user config doesn't drop required sub-fields
+    // (e.g. fallbackChain) that exist in DEFAULT_CONFIG.
+    config = {
+      ...DEFAULT_CONFIG,
+      ...projectConfig,
+      provider: {
+        ...DEFAULT_CONFIG.provider,
+        ...(projectConfig.provider ?? {}),
+        agent: {
+          ...DEFAULT_CONFIG.provider.agent,
+          ...(projectConfig.provider?.agent ?? {}),
+        },
+      },
+    } as SignhifyConfig;
   } else {
     for (const gPath of globalConfigPaths) {
       try {
         const loaded = await loadConfigFile(gPath, dir);
         if (loaded) {
-          config = { ...DEFAULT_CONFIG, ...loaded };
+          config = {
+            ...DEFAULT_CONFIG,
+            ...loaded,
+            provider: {
+              ...DEFAULT_CONFIG.provider,
+              ...(loaded.provider ?? {}),
+              agent: {
+                ...DEFAULT_CONFIG.provider.agent,
+                ...(loaded.provider?.agent ?? {}),
+              },
+            },
+          } as SignhifyConfig;
           break;
         }
       } catch {
@@ -480,6 +505,27 @@ export async function loadConfig(
   }
   if (opts.cliModel) {
     config.provider.agent.model = opts.cliModel;
+  }
+
+  // Validate the merged config (defaults + user config + CLI overrides).
+  // Strip runtime-resolved apiKey (not a config field) before schema check.
+  const agentCopy = { ...config.provider.agent };
+  delete agentCopy.apiKey;
+  const schemaConfig = {
+    ...config,
+    provider: { ...config.provider, agent: agentCopy },
+  };
+  try {
+    await signhifyConfigSchema(schemaConfig);
+  } catch {
+    console.warn("[Signhify] Invalid config detected — falling back to defaults. Run `signhify wizard` to reconfigure.");
+    config = JSON.parse(JSON.stringify(DEFAULT_CONFIG)) as SignhifyConfig;
+    if (opts.cliProvider) {
+      config.provider.agent.vendor = opts.cliProvider;
+    }
+    if (opts.cliModel) {
+      config.provider.agent.model = opts.cliModel;
+    }
   }
 
   const vendor = config.provider.agent.vendor;
@@ -574,7 +620,6 @@ async function loadConfigFile(configPath: string, projectDir?: string): Promise<
   validateNoPlaceholderApiKey(parsed);
   await validateConfigBeforeSecretStorage(parsed);
   const secured = await storeKeytarRefs(parsed);
-  await signhifyConfigSchema(secured);
   if (JSON.stringify(parsed) !== JSON.stringify(secured)) {
     await writeConfigFile(configPath, secured);
   }
